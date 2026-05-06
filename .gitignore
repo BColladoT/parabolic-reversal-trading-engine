@@ -1,0 +1,50 @@
+# Data and models — never commit
+data/cache/
+data/raw/
+models/
+*.parquet
+*.h5
+*.pkl
+*.pt
+*.pth
+*.ckpt
+
+# Reports and generated outputs
+reports/
+*.html
+!README.html
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Virtual envs
+venv/
+venv_ray310/
+venv_wsl/
+.venv/
+env/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Secrets and config
+.env
+.env.*
+!.env.template
+*.key
+config/secrets.yaml
+
+# Logs
+*.log
+logs/
