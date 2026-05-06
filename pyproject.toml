@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parabolic-reversal-trading-engine"
+version = "0.1.0"
+description = "Intraday short-selling system for parabolic micro-cap reversals. Polars + Numba rules engine with SAC reinforcement learning position sizing."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Brian Collado" }]
+requires-python = ">=3.9"
+keywords = [
+    "quantitative-finance",
+    "algorithmic-trading",
+    "reinforcement-learning",
+    "backtesting",
+    "soft-actor-critic",
+    "polars",
+    "numba",
+    "alpaca-api",
+    "walk-forward-optimization",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Scientific/Engineering",
+]
+dynamic = ["dependencies"]
+
+[project.urls]
+Repository = "https://github.com/BColladoT/parabolic-reversal-trading-engine"
+Documentation = "https://github.com/BColladoT/parabolic-reversal-trading-engine#readme"
+
+[project.optional-dependencies]
+rl = [
+    "torch>=2.0.0",
+    "ray[rllib]>=2.9.0",
+    "gymnasium>=0.29.0",
+    "tqdm>=4.65.0",
+    "tensorboard>=2.15.0",
+]
+test = ["pytest>=8.0.0"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = ["-ra", "--strict-markers", "--ignore=tests/manual"]
+markers = [
+    "slow: tests that take more than a few seconds",
+    "integration: tests that require external services (Alpaca, RLlib)",
+]
