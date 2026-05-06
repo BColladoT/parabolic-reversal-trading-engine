@@ -121,21 +121,30 @@ quant_trading/
 
 ## Setup
 
-```bash
-# Live trading + backtesting (Windows)
+Two environments because Ray/RLlib runs cleanest on Linux and the live engine targets Windows.
+
+**Live engine + backtesting (Windows PowerShell):**
+
+```powershell
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
 
-# RL training (WSL — separate venv with Ray/RLlib + PyTorch)
+# Configure broker credentials
+copy .env.template .env
+# Edit .env with your Alpaca paper-trading API keys
+```
+
+**RL training (WSL / Linux — adds PyTorch + Ray RLlib + Gymnasium on top of base deps):**
+
+```bash
 python -m venv venv_wsl
 source venv_wsl/bin/activate
 pip install -r wfo_context/requirements.txt
-
-# Configure broker credentials
-cp .env.template .env
-# Edit .env with your Alpaca paper-trading API keys
+export PYTHONPATH=/mnt/c/quant_trading/src:$PYTHONPATH
 ```
+
+Python 3.9, 3.10, or 3.11 supported. The CI matrix runs against all three.
 
 ## Running
 

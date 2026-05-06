@@ -1,8 +1,12 @@
-# High-Performance Trading Engine Dependencies
+# Live engine + backtesting dependencies (Windows venv).
+# RL training has additional deps — see wfo_context/requirements.txt.
+
 # Data Processing
 polars>=0.20.0
 pyarrow>=14.0.0
 numpy>=1.24.0
+pandas>=2.0.0
+yfinance>=0.2.0
 
 # Brokerage API
 alpaca-py>=0.15.0
