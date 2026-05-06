@@ -12,6 +12,8 @@ Outputs: docs/images/example_equity_curve.png
 
 Run:     python scripts/run_example_backtest.py
 """
+from __future__ import annotations
+
 from datetime import time, timedelta
 from pathlib import Path
 
