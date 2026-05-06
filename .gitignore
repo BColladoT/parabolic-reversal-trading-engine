@@ -52,3 +52,6 @@ logs/
 # Tooling state
 .claude/
 .tmp.driveupload/
+
+# Exploratory scripts (kept locally, not tracked)
+scratch/
