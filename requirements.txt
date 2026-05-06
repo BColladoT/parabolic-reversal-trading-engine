@@ -1,0 +1,35 @@
+# High-Performance Trading Engine Dependencies
+# Data Processing
+polars>=0.20.0
+pyarrow>=14.0.0
+numpy>=1.24.0
+
+# Brokerage API
+alpaca-py>=0.15.0
+websockets>=12.0
+
+# Performance Optimization
+numba>=0.58.0
+llvmlite>=0.41.0
+
+# Async & Concurrency
+asyncio-mqtt>=0.16.0
+aiohttp>=3.9.0
+
+# Time & Scheduling
+pytz>=2023.3
+schedule>=1.2.0
+
+# Logging & Monitoring
+structlog>=23.2.0
+python-json-logger>=2.0.7
+
+# Configuration
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+
+# Data Validation
+pydantic>=2.5.0
+
+# Optional: For backtesting analysis
+matplotlib>=3.8.0

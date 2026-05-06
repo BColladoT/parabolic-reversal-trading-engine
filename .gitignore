@@ -48,3 +48,7 @@ config/secrets.yaml
 # Logs
 *.log
 logs/
+
+# Tooling state
+.claude/
+.tmp.driveupload/

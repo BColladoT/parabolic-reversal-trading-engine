@@ -1,0 +1,163 @@
+# Parabolic Reversal Trading Engine Configuration
+# Strategy: Progressive Exhaustion Scale-In (Intraday Only)
+# Version: 2.0
+
+# Broker Configuration
+broker:
+  name: "alpaca"
+  paper_trading: true  # Set to false for live trading
+  api_base_url: "https://paper-api.alpaca.markets"
+  api_data_url: "https://data.alpaca.markets"
+  websocket_url: "wss://stream.data.alpaca.markets/v2/sip"
+  # Credentials loaded from environment variables:
+  # ALPACA_API_KEY, ALPACA_SECRET_KEY
+
+# Trading Schedule & Timezone
+timezone:
+  local_tz: "Europe/Madrid"
+  market_tz: "America/New_York"
+  scan_start: "09:45"           # ET - Start monitoring for setups
+  entry_window_start: "09:45"   # ET - Earliest entry
+  entry_window_end: "14:30"     # ET - No new entries after
+  flatten_time: "15:25"         # ET - Close all positions
+  market_open: "09:30"
+  market_close: "16:00"
+
+# Asset Screening Criteria (Intraday Only - No Multi-Day Requirement)
+screening:
+  min_percent_gain: 60.0           # Minimum % gain from open to qualify
+  max_percent_gain: 500.0          # Avoid extreme outliers
+  min_price: 2.0                   # Avoid sub-$2 stocks
+  max_price: 50.0                  # Focus on micro/small cap
+  min_volume: 500000               # Minimum volume to qualify
+  max_float_millions: 100          # Low float preference
+  # NOTE: Removed consecutive_green_days - we trade intraday only
+
+# Volume Exhaustion Detection
+volume_exhaustion:
+  peak_lookback_minutes: 390       # Full session lookback for volume peak
+  entry_threshold: 0.60            # Volume < 60% of peak = exhaustion
+  add2_threshold: 0.50             # Volume < 50% of peak = strong exhaustion
+  add3_threshold: 0.40             # Volume < 40% of peak = severe exhaustion
+  price_proximity_to_high: 0.95    # Must be within 5% of HOD to enter
+  new_high_required_for_add: true  # Must make new high on lower volume to add
+
+# Signal Detection
+signals:
+  vwap_extension_threshold: 1.20   # Price > 120% of VWAP (20% extension)
+  vwap_anchor: "session"           # VWAP anchored from 9:30 AM
+  min_exhaustion_factors: 2        # Minimum confirming factors for entry
+  
+  # Absorption detection settings
+  absorption_lookback_ticks: 50
+  momentum_divergence_periods: 3
+  
+  # Time between adds (cooldown)
+  min_minutes_between_adds: 10     # Minimum 10 min between position adds
+
+# Progressive Position Building (Scale-In)
+scaling:
+  enabled: true
+  initial_size_percent: 25         # First entry: 25% of max position
+  add2_size_percent: 25            # Second entry: 25% (50% total)
+  add3_size_percent: 50            # Third entry: 50% (100% total)
+  max_adds: 3                      # Maximum 3 entries per position
+  
+  # Position sizing limits
+  max_shares_per_position: 5000    # Hard share limit
+  max_position_value: 30000        # Max $30K position value (no leverage)
+
+# Risk Management
+risk:
+  max_portfolio_risk_percent: 1.0  # 1% max risk per FULL position
+  initial_stop_percent: 4.0        # 4% stop on initial entry
+  average_stop_percent: 3.5        # 3.5% stop on full position
+  daily_loss_limit_percent: 2.0    # Stop trading after -2% account loss
+  
+  max_positions: 3                 # Max concurrent positions
+  max_daily_trades: 9              # 3 positions × 3 adds max
+  
+  # ATR settings for volatility adjustment
+  atr_lookback: 14
+  atr_multiplier_stop: 2.0
+  
+  # Margin Requirements (future use)
+  min_account_equity: 2000
+  maintenance_margin_percent: 100
+
+# Leverage Settings (Disabled for now - future parameter)
+leverage:
+  enabled: false                   # NO LEVERAGE for now
+  max_leverage: 1.0                # 1:1 (cash only)
+  margin_buffer: 0.15
+
+# Exit Targets (Layered Profit Taking)
+exits:
+  # TP1: VWAP mean reversion
+  tp1_enabled: true
+  tp1_percent: 35                  # Close 35% at VWAP
+  tp1_target: "vwap"
+  
+  # TP2: Momentum continuation
+  tp2_enabled: true
+  tp2_percent: 35                  # Close 35% at -8% from entry
+  tp2_percent_drop: 8.0
+  
+  # TP3: Final exit
+  tp3_enabled: true
+  tp3_percent: 30                  # Close 30% at -15% from entry
+  tp3_percent_drop: 15.0
+  
+  # Trailing stop after TP1
+  use_trailing_after_tp1: true
+  trailing_activation_percent: 3.0 # Activate after 3% profit
+
+# Execution
+execution:
+  order_type: "limit"
+  limit_offset_ticks: 2
+  time_in_force: "ioc"
+  
+  # Emergency exits
+  hard_stop_at_apex: true
+  flatten_before_close_minutes: 35  # 15:25 ET
+
+# Technical Indicators
+indicators:
+  vwap:
+    anchor: "session"              # 9:30 AM anchor
+    reset_daily: true
+  atr:
+    period: 14
+    smoothing: "ema"
+
+# Compliance & Restrictions
+compliance:
+  spain_homogeneous_loss_rule: false  # Disable for now (set true if needed)
+  blacklist_duration_days: 365
+  no_overnight_positions: true
+  flat_before_close_minutes: 35
+
+# Data Processing
+data:
+  tick_buffer_size: 10000
+  bar_aggregation_seconds: 60      # 1-minute bars for analysis
+  volume_lookback_minutes: 5       # 5-min rolling volume
+  use_lazyframe: true
+
+# Performance
+performance:
+  numba_cache: true
+  numba_fastmath: true
+  numba_parallel: true
+  polars_threads: 0
+  websocket_auto_reconnect: true
+  reconnect_delay_seconds: 5
+
+# Logging
+logging:
+  level: "INFO"
+  file: "logs/trading_engine.log"
+  max_size_mb: 100
+  backup_count: 10
+  format: "json"
