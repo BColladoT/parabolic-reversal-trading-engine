@@ -119,6 +119,31 @@ quant_trading/
   scan_extended_universe.py  # Universe scanner
 ```
 
+## Quickstart
+
+Run a simplified V5 Relaxed backtest on five sample setups in one command, no credentials needed:
+
+```bash
+pip install -r requirements.txt
+python scripts/run_example_backtest.py
+```
+
+Output:
+
+```
+symbol date        entry      exit         gain%   vwap_x  shares        pnl  reason
+-----------------------------------------------------------------------------------------------
+BBIG   2021-08-27  14:24 ET   14:26 ET      62.0    1.311    1748    -199.97  hard_stop
+GME    2021-01-22  12:39 ET   12:40 ET      61.2    1.251     147    -381.39  hard_stop
+GME    2021-01-28  09:59 ET   10:00 ET      77.1    1.204      21    -196.39  hard_stop
+KOSS   2021-01-27  10:55 ET   10:56 ET      70.6    1.538     339    -199.81  hard_stop
+KOSS   2021-01-28  09:50 ET   09:59 ET      68.5    1.305      80   1,519.60  vwap_target
+```
+
+This is a stripped-down version of the strategy (single-tier entry, no scale-in, no ATR stop, no absorption detection). It shows the core entry signal — VWAP extension + volume exhaustion + time window — firing on real bars. The full production engine in `src/` adds scale-in, layered exits, and risk overlays; the headline 79.4% win rate above is from that engine, not this script.
+
+Sample data lives in [`data/sample/`](data/sample/README.md) (~430 KB total, committed to the repo).
+
 ## Setup
 
 Two environments because Ray/RLlib runs cleanest on Linux and the live engine targets Windows.

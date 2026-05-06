@@ -3,6 +3,7 @@ data/cache/
 data/raw/
 models/
 *.parquet
+!data/sample/*.parquet
 *.h5
 *.pkl
 *.pt
