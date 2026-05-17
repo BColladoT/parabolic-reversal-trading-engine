@@ -6,6 +6,15 @@ committed yet, these tests raise ImportError on collection — that's expected.
 """
 from __future__ import annotations
 
+# Importing src.scripts.backfill_tick_level transitively triggers
+# src/backtest/__init__.py, which eagerly constructs singletons that need
+# Alpaca credentials. In CI those env vars don't exist. Set dummy values
+# BEFORE the imports below so the singletons construct against a stub.
+import os
+os.environ.setdefault("ALPACA_API_KEY", "ci-stub-key")
+os.environ.setdefault("ALPACA_SECRET", "ci-stub-secret")
+os.environ.setdefault("ALPACA_SECRET_KEY", "ci-stub-secret")
+
 import pickle
 from datetime import datetime, timedelta
 from pathlib import Path
