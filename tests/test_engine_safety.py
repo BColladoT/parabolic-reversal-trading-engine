@@ -119,3 +119,59 @@ def test_startup_passes_when_broker_positions_known_to_engine():
     eng.risk_manager = MagicMock(positions={"AMC": MagicMock()})
     # Should not raise - engine already tracks the position
     eng._reconcile_on_startup()
+
+
+def test_is_market_open_falls_back_on_alpaca_error():
+    from src.main_engine import TradingEngine
+    import pytz
+    eng = TradingEngine.__new__(TradingEngine)
+    eng.market_tz = pytz.timezone("America/New_York")
+    eng.alpaca = MagicMock()
+    eng.alpaca.trading_client.get_clock.side_effect = ConnectionError("network down")
+    # Should not raise; should fall through to time-based check
+    result = eng._is_market_open()
+    assert isinstance(result, bool)
+
+
+def test_is_market_open_falls_back_on_timeout():
+    from src.main_engine import TradingEngine
+    import pytz
+    eng = TradingEngine.__new__(TradingEngine)
+    eng.market_tz = pytz.timezone("America/New_York")
+    eng.alpaca = MagicMock()
+    eng.alpaca.trading_client.get_clock.side_effect = TimeoutError("rpc slow")
+    result = eng._is_market_open()
+    assert isinstance(result, bool)
+
+
+def test_is_market_open_propagates_unexpected_error():
+    """Programming errors (e.g. AttributeError) should still surface."""
+    from src.main_engine import TradingEngine
+    import pytz
+    eng = TradingEngine.__new__(TradingEngine)
+    eng.market_tz = pytz.timezone("America/New_York")
+    eng.alpaca = MagicMock()
+    eng.alpaca.trading_client.get_clock.side_effect = AttributeError("bug")
+    with pytest.raises(AttributeError):
+        eng._is_market_open()
+
+
+def test_error_count_decays_after_one_hour_clean():
+    """error_count should decay to 0 after an hour of no new errors."""
+    import time as time_mod
+    from src.main_engine import TradingEngine
+    eng = TradingEngine.__new__(TradingEngine)
+    eng.error_count = 5
+    eng._last_error_time = time_mod.time() - 3700  # >1h ago
+    eng._maybe_decay_errors()
+    assert eng.error_count == 0
+
+
+def test_error_count_does_not_decay_within_hour():
+    import time as time_mod
+    from src.main_engine import TradingEngine
+    eng = TradingEngine.__new__(TradingEngine)
+    eng.error_count = 5
+    eng._last_error_time = time_mod.time() - 60  # 1 min ago
+    eng._maybe_decay_errors()
+    assert eng.error_count == 5
