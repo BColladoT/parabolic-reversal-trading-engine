@@ -201,10 +201,10 @@ def create_v5_relaxed_agent_fraction_of_equity(
 ) -> RuleBasedAgent:
     """
     Factory function for V5 Relaxed rule agent with equity-fraction sizing.
-    
+
     This matches the RL convention of sizing as fraction of capital
     with a hard maximum position value cap.
-    
+
     Args:
         fraction: Target exposure as fraction of equity (e.g., 0.30 = 30%)
         max_position: Hard cap in dollars (matches RL's max_position_value)
@@ -217,3 +217,59 @@ def create_v5_relaxed_agent_fraction_of_equity(
         max_position_value=max_position
     )
     return RuleBasedAgent(config)
+
+
+def run_baseline(
+    entry_price: float,
+    exit_price: float,
+    shares: int,
+    side: str = "short",
+    transaction_cost_bps: float = 30.0,
+) -> float:
+    """
+    Compute net PnL for a single rule-baseline round-trip trade,
+    charging a per-leg transaction cost to match ``src/rl/env.py``.
+
+    The RL environment charges 30bps on each leg of every trade. For RL-vs-rule
+    comparisons to be honest, the rule baseline must charge the same. This
+    function is the public entry-point that callers (e.g., the comparison
+    harness or future analytics) use to compute a trade's net PnL with costs.
+
+    Cost model (per leg):
+        leg_fee = leg_price * shares * (transaction_cost_bps / 10_000.0)
+
+    Net PnL:
+        short: net = (entry_price - exit_price) * shares - entry_fee - exit_fee
+        long:  net = (exit_price - entry_price) * shares - entry_fee - exit_fee
+
+    Args:
+        entry_price: Fill price on the opening leg.
+        exit_price:  Fill price on the closing leg.
+        shares:      Share count (>= 0).
+        side:        ``"short"`` (default — matches the parabolic strategy) or ``"long"``.
+        transaction_cost_bps: Per-leg cost in basis points. Default 30.0 matches
+            ``src/rl/env.py``'s ``transaction_cost_bps`` so RL-vs-rule comparison
+            stops being noise.
+
+    Returns:
+        Net realized PnL in dollars, after charging the cost on BOTH legs.
+    """
+    if shares < 0:
+        raise ValueError(f"shares must be >= 0, got {shares}")
+    if transaction_cost_bps < 0:
+        raise ValueError(f"transaction_cost_bps must be >= 0, got {transaction_cost_bps}")
+
+    side_norm = side.lower().strip()
+    if side_norm == "short":
+        gross_pnl = (entry_price - exit_price) * shares
+    elif side_norm == "long":
+        gross_pnl = (exit_price - entry_price) * shares
+    else:
+        raise ValueError(f"side must be 'short' or 'long', got {side!r}")
+
+    # Per-leg cost: entry_price * shares * (bps/10000.0) on entry, same on exit.
+    cost_fraction = transaction_cost_bps / 10_000.0
+    entry_fee = entry_price * shares * cost_fraction
+    exit_fee = exit_price * shares * cost_fraction
+
+    return gross_pnl - entry_fee - exit_fee

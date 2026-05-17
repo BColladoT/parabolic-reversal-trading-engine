@@ -85,10 +85,33 @@ def _stats_from(df: pl.DataFrame) -> tuple[int, float, float, float]:
     return n, float(win_rate), float(avg_win or 0.0), float(avg_loss or 0.0)
 
 
+def _try_regime_filter(df: pl.DataFrame, regime_label: str) -> Optional[pl.DataFrame]:
+    """Inner-join `df` onto the regime side-table filtered to `regime_label`.
+
+    Returns the joined frame on success, or None when the regime table is
+    missing/empty/unreadable (so the caller falls through with original df).
+    """
+    try:
+        from src.risk.regime import read_regime_history
+        regime_df = read_regime_history()
+    except Exception:
+        return None
+    if regime_df.is_empty():
+        return None
+    regime_for_label = regime_df.filter(pl.col("label") == regime_label).select("date")
+    df_with_date = df.with_columns(pl.col("entry_time").dt.date().alias("_d"))
+    return (
+        df_with_date
+        .join(regime_for_label, left_on="_d", right_on="date", how="inner")
+        .drop("_d")
+    )
+
+
 def compute_edge(
     features: Optional[dict[str, float]] = None,
     lookback_days: Optional[int] = 365,
     min_samples_conditional: int = 20,
+    regime_label: Optional[str] = None,
 ) -> EdgeStats:
     today = date.today()
     # lookback_days=None means "all available data" — used by inspect tools and
@@ -100,12 +123,27 @@ def compute_edge(
     if df.is_empty():
         return _EMPTY
 
+    # Regime filter: best-effort inner-join on entry-date. When the regime
+    # filter narrows the trade set to >= min_samples_conditional rows we
+    # treat the conditional regime stats as the authoritative result
+    # (used_fallback=False). When the regime side-table is missing, the
+    # filtered set is too small, or anything else goes wrong, we degrade
+    # gracefully to the un-regime-filtered overall stats.
+    regime_applied = False
+    if regime_label:
+        filtered = _try_regime_filter(df, regime_label)
+        if filtered is not None and filtered.shape[0] >= min_samples_conditional:
+            df = filtered
+            regime_applied = True
+        # else: silent fall-through with original df.
+
     overall_n, w_overall, win_r_overall, loss_r_overall = _stats_from(df)
     overall_expected = w_overall * win_r_overall + (1 - w_overall) * loss_r_overall
     overall_kelly = _kelly(w_overall, win_r_overall, loss_r_overall)
     overall = EdgeStats(
         overall_n, w_overall, win_r_overall, loss_r_overall,
-        overall_expected, overall_kelly, used_fallback=True,
+        overall_expected, overall_kelly,
+        used_fallback=not regime_applied,
     )
 
     if not features:

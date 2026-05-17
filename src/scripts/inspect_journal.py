@@ -4,10 +4,12 @@ Usage:
     python -m src.scripts.inspect_journal
     python -m src.scripts.inspect_journal --feature vwap_extension
     python -m src.scripts.inspect_journal --feature volume_ratio
+    python -m src.scripts.inspect_journal --regime risk_on
 """
 from __future__ import annotations
 
 import argparse
+from typing import Optional
 
 import polars as pl
 
@@ -15,11 +17,12 @@ from src.risk.edge_estimator import compute_edge, consecutive_losses
 from src.risk.trade_journal import read_trades
 
 
-def _print_overall() -> None:
+def _print_overall(regime_label: Optional[str] = None) -> None:
     # Pass lookback_days=None so historical backfill data (often >1yr old)
     # is included in the displayed stats. Live sizing uses a tighter default.
-    e = compute_edge(lookback_days=None)
-    print("=== Overall edge ===")
+    e = compute_edge(lookback_days=None, regime_label=regime_label)
+    suffix = f" ({regime_label})" if regime_label else ""
+    print(f"=== Overall edge{suffix} ===")
     print(f"n_trades         : {e.n_trades}")
     if e.n_trades == 0:
         print("(journal is empty - run backfill or trade some live setups first)")
@@ -92,8 +95,13 @@ def main() -> None:
         default=None,
         help="Feature to slice by (e.g. vwap_extension, volume_ratio, atr_pct)",
     )
+    parser.add_argument(
+        "--regime",
+        default=None,
+        help="Filter to a specific regime label (risk_on / risk_off / neutral)",
+    )
     args = parser.parse_args()
-    _print_overall()
+    _print_overall(regime_label=args.regime)
     if args.feature:
         print()
         _print_by_slice(args.feature)

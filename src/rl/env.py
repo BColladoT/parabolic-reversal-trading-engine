@@ -36,6 +36,38 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def r_multiple_reward_term(
+    realized_r: float,
+    weight: float,
+    clip: float = 5.0,
+) -> float:
+    """Per-trade R-multiple reward contribution (pure-Python, torch-free).
+
+    Returns ``0.0`` when ``weight`` is ``0.0`` (backward-compatible no-op so
+    the existing Sortino + drawdown reward path is mathematically unchanged
+    for callers that don't opt in). Otherwise clips ``realized_r`` to
+    ``[-clip, +clip]`` and multiplies by ``weight``. NaN/inf realized R
+    (rare but possible if initial risk is zero) collapses to ``0.0`` so it
+    cannot pollute the reward signal.
+
+    Args:
+        realized_r: Closed-trade R-multiple (pnl / initial_risk). Can be
+            negative; can be NaN/inf if upstream math degenerates.
+        weight: Scaling factor. ``0.0`` disables the term entirely.
+        clip: Saturation magnitude applied before scaling.
+
+    Returns:
+        ``weight * max(-clip, min(clip, realized_r))`` — or ``0.0`` for NaN.
+    """
+    import math as _math  # local import so helper stays self-contained
+    if weight == 0.0:
+        return 0.0
+    if not _math.isfinite(realized_r):
+        return 0.0
+    clamped = max(-clip, min(clip, float(realized_r)))
+    return float(weight) * clamped
+
+
 @dataclass
 class TradeRecord:
     """Record of a completed trade."""
@@ -100,7 +132,12 @@ class EnvironmentConfig:
     nn_max_penalty: float = -10.0
     nn_max_reward: float = 10.0
     max_pnl_reference: float = 20000.0  # $20k PnL → +10.0 reward
-    
+
+    # R-multiple reward term (A4): opt-in per-trade attribution signal.
+    # Default weight 0.0 → mathematically identical to pre-A4 reward.
+    r_multiple_reward_weight: float = 0.0
+    r_multiple_reward_clip: float = 5.0
+
     # Action space
     action_space_low: float = -1.0
     action_space_high: float = 1.0
@@ -863,12 +900,24 @@ class ParabolicReversalEnv(gym.Env):
         hold_discipline = self._compute_hold_discipline()
 
         completion_bonus = 0.0
+        r_multiple_term = 0.0  # A4: per-trade R-multiple reward (default weight 0 = no-op)
         if prev_position < 0 and self.current_position == 0:
+            trade_pnl = getattr(self, '_last_trade_pnl', 0.0)
             completion_bonus = self._compute_trade_completion_bonus(
-                trade_pnl=getattr(self, '_last_trade_pnl', 0.0),
+                trade_pnl=trade_pnl,
                 bars_held=prev_bars_in_trade,
                 mfe=self.max_favorable_excursion,
                 mae=self.max_adverse_excursion,
+            )
+            # A4: realized R-multiple = trade_pnl / per-trade risk denominator.
+            # Use abs(max_acceptable_drawdown) as the R unit ($5K default — the
+            # per-trade risk threshold already configured for drawdown shaping).
+            risk_denom = abs(self.config.max_acceptable_drawdown)
+            realized_r = trade_pnl / risk_denom if risk_denom > 1e-6 else 0.0
+            r_multiple_term = r_multiple_reward_term(
+                realized_r=realized_r,
+                weight=self.config.r_multiple_reward_weight,
+                clip=self.config.r_multiple_reward_clip,
             )
             # Reset excursion trackers after trade close
             self.max_favorable_excursion = 0.0
@@ -883,7 +932,10 @@ class ParabolicReversalEnv(gym.Env):
         if abs(shaping_total) > max_shaping_abs:
             shaping_total = np.sign(shaping_total) * max_shaping_abs
 
-        raw_reward = base_reward + drawdown_penalty + (w * shaping_total)
+        # A4: r_multiple_term is added outside the shaping cap because it is an
+        # attribution signal (not shaping). Defaults to 0.0 when the opt-in
+        # weight is 0.0, preserving pre-A4 reward exactly.
+        raw_reward = base_reward + drawdown_penalty + (w * shaping_total) + r_multiple_term
         # Curriculum reward scale applied AFTER percentile normalization (FIX 1)
         reward = self.reward_scaler.scale(raw_reward) * self.config.reward_scale
 
