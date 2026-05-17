@@ -154,7 +154,8 @@ class TradingEngine:
                 day_low=signal.price * 0.9, day_open=signal.price * 0.5,
                 day_volume=1000000, percent_gain=100, percent_from_high=5,
                 days_up=2, shortable=True, easy_to_borrow=True
-            )).day_high
+            )).day_high,
+            features=getattr(signal, "features", None),
         )
         
         if not sizing['valid']:

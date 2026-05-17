@@ -248,7 +248,9 @@ class RiskManager:
     
     def calculate_position_size(self, symbol: str, entry_price: float,
                                 atr: float, vwap: float, day_high: float,
-                                add_level: int = 1) -> Dict:
+                                add_level: int = 1,
+                                features: Optional[Dict[str, float]] = None,
+                                dry_run: bool = False) -> Dict:
         """
         Calculate position size for initial entry or scale-in.
 
@@ -265,15 +267,31 @@ class RiskManager:
         - A drawdown modifier (1.0 -> 0.5 after 3 losses -> 0.25 after 5+)
           scales whichever path was taken.
         - On any failure inside the edge path we silently use the fixed-% logic.
+
+        Parameters
+        ----------
+        features : Optional[Dict[str, float]]
+            Caller-provided signal features (vwap_extension, volume_ratio, etc.)
+            used to look up the conditional Kelly slice in the trade journal.
+            When None we fall through to the unconditional (overall) edge stats.
+        dry_run : bool
+            When True the function MUST NOT mutate any RiskManager state. The
+            current implementation does not mutate during sizing (mutations
+            happen in open_position / execute_partial_exit / close_position),
+            so this is currently a no-op flag for API clarity and downstream
+            diagnostic tooling.
         """
         # Edge-aware sizing inputs (best-effort; falls back silently to fixed-%)
         from src.risk.edge_estimator import compute_edge, consecutive_losses
         try:
-            features = {
+            # Forward caller-supplied features when provided; otherwise synthesize
+            # a minimal feature dict from the entry geometry so we still get a
+            # conditional slice when possible.
+            forwarded_features = features if features is not None else {
                 "feat_vwap_extension": (entry_price - vwap) / vwap if vwap else 0.0,
                 "feat_atr_pct": (atr / entry_price) if entry_price else 0.0,
             }
-            edge = compute_edge(features=features)
+            edge = compute_edge(features=forwarded_features)
             losses_streak = consecutive_losses(lookback_trades=10)
         except Exception:
             edge = None
@@ -378,9 +396,26 @@ class RiskManager:
 
         # Check margin requirements
         if not self.check_margin_requirements(position_value, entry_price):
-            return {'shares': 0, 'valid': False, 'reason': 'margin'}
+            decision = {'shares': 0, 'valid': False, 'reason': 'margin'}
+            logger.info(
+                "position_sizing.decision",
+                symbol=symbol,
+                entry_price=entry_price,
+                n_trades=edge.n_trades if edge is not None else 0,
+                win_rate=edge.win_rate if edge is not None else 0.0,
+                expected_r=edge.expected_r if edge is not None else 0.0,
+                kelly_fraction=edge.kelly_fraction if edge is not None else 0.0,
+                dd_modifier=dd_modifier,
+                shares=0,
+                total_risk=0.0,
+                valid=False,
+                reason='margin',
+                features=features,
+                dry_run=dry_run,
+            )
+            return decision
 
-        return {
+        decision = {
             'shares': shares,
             'valid': True,
             'stop_loss': stop_loss,
@@ -393,6 +428,23 @@ class RiskManager:
             'edge_n_trades': edge.n_trades if edge is not None else 0,
             'dd_modifier': dd_modifier,
         }
+        logger.info(
+            "position_sizing.decision",
+            symbol=symbol,
+            entry_price=entry_price,
+            n_trades=edge.n_trades if edge is not None else 0,
+            win_rate=edge.win_rate if edge is not None else 0.0,
+            expected_r=edge.expected_r if edge is not None else 0.0,
+            kelly_fraction=edge.kelly_fraction if edge is not None else 0.0,
+            dd_modifier=dd_modifier,
+            shares=shares,
+            total_risk=decision['total_risk'],
+            valid=True,
+            reason=None,
+            features=features,
+            dry_run=dry_run,
+        )
+        return decision
     
     def open_position(self, symbol: str, entry_price: float, qty: int,
                       stop_loss: float, vwap: float, day_high: float,
