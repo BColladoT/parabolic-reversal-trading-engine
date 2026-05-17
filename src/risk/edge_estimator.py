@@ -22,8 +22,9 @@ otherwise the overall stats are returned with used_fallback=True.
 """
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Optional
+from typing import Callable, Optional
 
+import numpy as np
 import polars as pl
 
 from src.risk.trade_journal import read_trades
@@ -40,9 +41,34 @@ class EdgeStats:
     expected_r: float
     kelly_fraction: float
     used_fallback: bool
+    win_rate_ci_low: float = float("nan")
+    win_rate_ci_high: float = float("nan")
+    expected_r_ci_low: float = float("nan")
+    expected_r_ci_high: float = float("nan")
 
 
 _EMPTY = EdgeStats(0, 0.0, 0.0, 0.0, 0.0, 0.0, True)
+
+
+def bootstrap_ci(
+    values,
+    statistic: Callable[[np.ndarray], float],
+    n_iter: int = 1000,
+    alpha: float = 0.05,
+    seed: Optional[int] = 42,
+) -> tuple[float, float]:
+    """Return (low, high) for a 1-alpha CI of `statistic(values)`.
+    Returns (nan, nan) when len(values) < 5."""
+    arr = np.asarray(values, dtype=float)
+    if arr.size < 5:
+        return float("nan"), float("nan")
+    rng = np.random.default_rng(seed)
+    n = arr.size
+    resamples = rng.choice(arr, size=(n_iter, n), replace=True)
+    stats = np.apply_along_axis(statistic, 1, resamples)
+    low = float(np.quantile(stats, alpha / 2))
+    high = float(np.quantile(stats, 1 - alpha / 2))
+    return low, high
 
 
 def _kelly(win_rate: float, avg_win_r: float, avg_loss_r: float) -> float:
@@ -140,10 +166,22 @@ def compute_edge(
     overall_n, w_overall, win_r_overall, loss_r_overall = _stats_from(df)
     overall_expected = w_overall * win_r_overall + (1 - w_overall) * loss_r_overall
     overall_kelly = _kelly(w_overall, win_r_overall, loss_r_overall)
+    overall_win_values = df["win"].cast(pl.Float64).to_numpy() if not df.is_empty() else np.array([])
+    overall_r_values = df["r_multiple"].to_numpy() if not df.is_empty() else np.array([])
+    overall_win_ci_low, overall_win_ci_high = bootstrap_ci(
+        overall_win_values, statistic=np.mean, n_iter=1000
+    )
+    overall_r_ci_low, overall_r_ci_high = bootstrap_ci(
+        overall_r_values, statistic=np.mean, n_iter=1000
+    )
     overall = EdgeStats(
         overall_n, w_overall, win_r_overall, loss_r_overall,
         overall_expected, overall_kelly,
         used_fallback=not regime_applied,
+        win_rate_ci_low=overall_win_ci_low,
+        win_rate_ci_high=overall_win_ci_high,
+        expected_r_ci_low=overall_r_ci_low,
+        expected_r_ci_high=overall_r_ci_high,
     )
 
     if not features:
@@ -162,7 +200,22 @@ def compute_edge(
     n, w, win_r, loss_r = _stats_from(sliced)
     expected = w * win_r + (1 - w) * loss_r
     kelly = _kelly(w, win_r, loss_r)
-    return EdgeStats(n, w, win_r, loss_r, expected, kelly, used_fallback=False)
+    sliced_win_values = sliced["win"].cast(pl.Float64).to_numpy()
+    sliced_r_values = sliced["r_multiple"].to_numpy()
+    sliced_win_ci_low, sliced_win_ci_high = bootstrap_ci(
+        sliced_win_values, statistic=np.mean, n_iter=1000
+    )
+    sliced_r_ci_low, sliced_r_ci_high = bootstrap_ci(
+        sliced_r_values, statistic=np.mean, n_iter=1000
+    )
+    return EdgeStats(
+        n, w, win_r, loss_r, expected, kelly,
+        used_fallback=False,
+        win_rate_ci_low=sliced_win_ci_low,
+        win_rate_ci_high=sliced_win_ci_high,
+        expected_r_ci_low=sliced_r_ci_low,
+        expected_r_ci_high=sliced_r_ci_high,
+    )
 
 
 def consecutive_losses(lookback_trades: int = 10) -> int:
