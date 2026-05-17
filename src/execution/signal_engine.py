@@ -54,7 +54,12 @@ class VolumeProfile:
 
 @dataclass
 class TradeSignal:
-    """Generated trading signal."""
+    """Generated trading signal.
+
+    On ENTRY_SHORT emissions, the ``features`` dict carries a feature snapshot
+    consumed downstream by the trade journal and edge estimator. For non-entry
+    signals (ADD_POSITION, exits) ``features`` is left as the default empty dict.
+    """
     symbol: str
     signal_type: SignalType
     timestamp: datetime
@@ -67,6 +72,15 @@ class TradeSignal:
     is_add_signal: bool = False      # True if scaling into existing position
     add_level: int = 0               # 1=initial, 2=add2, 3=add3
     notes: str = ""
+    # Entry-feature snapshot for the trade journal (consumed by Position + edge estimator).
+    # Required keys at ENTRY_SHORT emission time:
+    #   vwap_extension   - (price - vwap) / vwap
+    #   volume_ratio     - current vs peak
+    #   atr_pct          - atr / price
+    #   time_of_day_min  - minutes since 09:30 ET (as float)
+    #   day_of_week      - 0=Mon..4=Fri (as float)
+    #   factors_count    - number of exhaustion factors that triggered (as float)
+    features: Dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -234,6 +248,22 @@ class ParabolicSignalEngine:
             entry_vwap=vwap
         )
         
+        # Build feature snapshot for the trade journal (consumed downstream by
+        # Position + edge estimator). Keys must match the schema in
+        # src/risk/trade_journal.py and src/risk/edge_estimator.py.
+        now_local = datetime.now()
+        features_snapshot = {
+            # vwap_extension as a normalized excess above VWAP (not the ratio).
+            # The local `vwap_extension` variable above is price/vwap; here we want
+            # (price - vwap)/vwap so 0.20 means +20%.
+            "vwap_extension": ((current_price - vwap) / vwap) if vwap else 0.0,
+            "volume_ratio": float(volume_ratio),
+            "atr_pct": (atr / current_price) if current_price else 0.0,
+            "time_of_day_min": float((now_local.hour - 9) * 60 + (now_local.minute - 30)),
+            "day_of_week": float(now_local.weekday()),
+            "factors_count": float(confirming_factors),
+        }
+
         signal = TradeSignal(
             symbol=symbol,
             signal_type=SignalType.ENTRY_SHORT,
@@ -246,7 +276,8 @@ class ParabolicSignalEngine:
             volume_exhaustion=volume_exhausted,
             is_add_signal=False,
             add_level=1,
-            notes=f"Initial entry. VWAP:{vwap_extension:.2f}x, VolRatio:{volume_ratio:.2f}, Factors:{confirming_factors}"
+            notes=f"Initial entry. VWAP:{vwap_extension:.2f}x, VolRatio:{volume_ratio:.2f}, Factors:{confirming_factors}",
+            features=features_snapshot,
         )
         
         # Update position state
