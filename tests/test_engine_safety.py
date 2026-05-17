@@ -60,3 +60,32 @@ def test_reset_daily_stats_fires_on_new_et_day():
     eng.risk_manager.reset_daily_stats.reset_mock()
     eng._maybe_reset_daily(fake_now)  # same day -> no second call
     eng.risk_manager.reset_daily_stats.assert_not_called()
+
+
+def test_daily_state_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setenv("DAILY_STATE_PATH", str(tmp_path / "daily_state.json"))
+    rm1 = RiskManager(alpaca_client=MagicMock())
+    rm1.account_equity = 100_000
+    rm1.daily_pnl = -1234.5
+    rm1._persist_daily_state()
+
+    rm2 = RiskManager(alpaca_client=MagicMock())
+    rm2._restore_daily_state()
+    assert rm2.daily_pnl == pytest.approx(-1234.5)
+
+
+def test_daily_state_ignored_when_stale_date(tmp_path, monkeypatch):
+    """State from yesterday should NOT be restored (we want a fresh slate)."""
+    import json
+    state_file = tmp_path / "daily_state.json"
+    state_file.write_text(json.dumps({
+        "date": "1999-01-01",
+        "daily_pnl": -9999.0,
+        "daily_loss_limit_hit": True,
+    }))
+    monkeypatch.setenv("DAILY_STATE_PATH", str(state_file))
+
+    rm = RiskManager(alpaca_client=MagicMock())
+    rm._restore_daily_state()
+    assert rm.daily_pnl == 0.0
+    assert rm.daily_stats['daily_loss_limit_hit'] is False
