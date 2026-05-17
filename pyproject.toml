@@ -9,7 +9,7 @@ description = "Intraday short-selling system for parabolic micro-cap reversals. 
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Brian Collado" }]
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 keywords = [
     "quantitative-finance",
     "algorithmic-trading",
