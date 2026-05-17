@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import math
 from typing import Optional
 
 import polars as pl
@@ -28,10 +29,16 @@ def _print_overall(regime_label: Optional[str] = None) -> None:
         print("(journal is empty - run backfill or trade some live setups first)")
         print(f"consecutive_loss : {consecutive_losses()}")
         return
-    print(f"win_rate         : {e.win_rate:.2%}")
+    if math.isnan(e.win_rate_ci_low):
+        print(f"win_rate         : {e.win_rate:.2%}  (95% CI: n/a)")
+    else:
+        print(f"win_rate         : {e.win_rate:.2%}  (95% CI: {e.win_rate_ci_low:.2%} - {e.win_rate_ci_high:.2%})")
     print(f"avg_win_r        : {e.avg_win_r:+.2f}")
     print(f"avg_loss_r       : {e.avg_loss_r:+.2f}")
-    print(f"expected_r       : {e.expected_r:+.3f}")
+    if math.isnan(e.expected_r_ci_low):
+        print(f"expected_r       : {e.expected_r:+.3f}  (95% CI: n/a)")
+    else:
+        print(f"expected_r       : {e.expected_r:+.3f}  (95% CI: {e.expected_r_ci_low:+.2f} - {e.expected_r_ci_high:+.2f})")
     print(f"kelly_fraction   : {e.kelly_fraction:.3f} (quarter-Kelly cap = 0.25)")
     print(f"consecutive_loss : {consecutive_losses()}")
 
