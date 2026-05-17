@@ -15,6 +15,7 @@ from src.utils.config import CONFIG
 from src.utils.logger import logger
 from src.data.alpaca_client import AlpacaClient
 from src.indicators.numba_kernels import calculate_position_size_numba
+from src.risk.trade_journal import append_trade
 
 
 class PositionStatus(Enum):
@@ -515,6 +516,36 @@ class RiskManager:
             total_pnl=f"${position.realized_pnl:.2f}",
             reason=reason
         )
+
+        # Best-effort journal write. A failure here must never block trade closure.
+        try:
+            initial_risk_per_share = abs(position.stop_loss - position.entry_price_avg)
+            initial_risk = initial_risk_per_share * remaining_shares
+            r_multiple = (pnl / initial_risk) if initial_risk > 0 else 0.0
+            hold_seconds = int((datetime.now() - position.entry_time).total_seconds())
+            feats = position.entry_features or {}
+            append_trade({
+                "symbol": symbol,
+                "entry_time": position.entry_time,
+                "exit_time": datetime.now(),
+                "entry_price": float(position.entry_price_avg),
+                "exit_price": float(exit_price),
+                "shares": int(remaining_shares),
+                "side": position.side,
+                "pnl": float(pnl),
+                "r_multiple": float(r_multiple),
+                "hold_seconds": hold_seconds,
+                "exit_reason": reason,
+                "win": bool(pnl > 0),
+                "feat_vwap_extension": float(feats.get("vwap_extension", 0.0)),
+                "feat_volume_ratio": float(feats.get("volume_ratio", 0.0)),
+                "feat_atr_pct": float(feats.get("atr_pct", 0.0)),
+                "feat_time_of_day_min": float(feats.get("time_of_day_min", 0.0)),
+                "feat_day_of_week": float(feats.get("day_of_week", 0.0)),
+                "feat_factors_count": float(feats.get("factors_count", 0.0)),
+            })
+        except Exception as e:
+            logger.warning("trade journal append failed", error=str(e), symbol=symbol)
 
         self._persist_daily_state()
         return pnl
