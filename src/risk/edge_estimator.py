@@ -87,11 +87,16 @@ def _stats_from(df: pl.DataFrame) -> tuple[int, float, float, float]:
 
 def compute_edge(
     features: Optional[dict[str, float]] = None,
-    lookback_days: int = 365,
+    lookback_days: Optional[int] = 365,
     min_samples_conditional: int = 20,
 ) -> EdgeStats:
     today = date.today()
-    df = read_trades(date_from=today - timedelta(days=lookback_days))
+    # lookback_days=None means "all available data" — used by inspect tools and
+    # by callers that want backfilled historical priors regardless of age.
+    if lookback_days is None:
+        df = read_trades()
+    else:
+        df = read_trades(date_from=today - timedelta(days=lookback_days))
     if df.is_empty():
         return _EMPTY
 

@@ -151,7 +151,21 @@ def atr_pct_at(bars: pl.DataFrame, ts: datetime, window: int = 14) -> float:
     """
     if bars.is_empty():
         return 0.0
-    window_bars = bars.filter(pl.col("timestamp") <= ts).tail(window)
+    # Best-effort: bars and ts may have mismatched timezone awareness
+    # (parquet bars often UTC-tagged; engine audit times may be tz-aware
+    # market-local). Try comparison as-is; fall back to TZ-normalized
+    # comparison; fall back to 0.0 on any other failure.
+    try:
+        window_bars = bars.filter(pl.col("timestamp") <= ts).tail(window)
+    except Exception:
+        try:
+            naive_ts = ts.replace(tzinfo=None) if ts.tzinfo else ts
+            naive_bars = bars.with_columns(
+                pl.col("timestamp").dt.replace_time_zone(None)
+            )
+            window_bars = naive_bars.filter(pl.col("timestamp") <= naive_ts).tail(window)
+        except Exception:
+            return 0.0
     if window_bars.shape[0] < window:
         return 0.0
     tr = (window_bars["high"] - window_bars["low"]).mean()

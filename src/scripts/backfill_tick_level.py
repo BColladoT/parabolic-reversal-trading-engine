@@ -8,11 +8,21 @@ from __future__ import annotations
 
 import argparse
 import pickle
+import sys
 from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
 import polars as pl
+
+# Force UTF-8 on stdout/stderr so warning messages with non-ASCII chars
+# (e.g. Polars error strings containing 'μs') don't crash on Windows cp1252.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 from src.backtest.tick_backtest_engine_v5 import TickBacktestEngineV5
 from src.risk.trade_journal import append_trade, read_trades
@@ -106,7 +116,11 @@ def backfill(
             stats["setups_skipped"] += 1
             continue
 
-        result = engine.run_tick_backtest(setup, bars)
+        # Engine signature: run_tick_backtest(symbol: str, date: datetime, verbose)
+        # It fetches its own tick data internally via tick_fetcher; the parquet
+        # bars we loaded above are only used for our ATR-at-entry computation.
+        engine_date = datetime.combine(setup_date, datetime.min.time())
+        result = engine.run_tick_backtest(symbol, engine_date, verbose=False)
         audit = getattr(result, "audit_records", []) or []
         risk_per_share = _initial_risk_per_share(audit)
         trades = trades_from_engine_result(result, symbol)
