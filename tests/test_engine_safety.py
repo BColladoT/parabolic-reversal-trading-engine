@@ -89,3 +89,33 @@ def test_daily_state_ignored_when_stale_date(tmp_path, monkeypatch):
     rm._restore_daily_state()
     assert rm.daily_pnl == 0.0
     assert rm.daily_stats['daily_loss_limit_hit'] is False
+
+
+def test_startup_refuses_when_broker_has_unknown_positions():
+    from src.main_engine import TradingEngine
+    eng = TradingEngine.__new__(TradingEngine)
+    eng.alpaca = MagicMock()
+    eng.alpaca.get_positions.return_value = [{"symbol": "AMC", "qty": -100}]
+    eng.risk_manager = MagicMock(positions={})  # engine knows nothing
+    with pytest.raises(RuntimeError, match="broker has positions"):
+        eng._reconcile_on_startup()
+
+
+def test_startup_passes_when_broker_flat():
+    from src.main_engine import TradingEngine
+    eng = TradingEngine.__new__(TradingEngine)
+    eng.alpaca = MagicMock()
+    eng.alpaca.get_positions.return_value = []
+    eng.risk_manager = MagicMock(positions={})
+    # Should not raise
+    eng._reconcile_on_startup()
+
+
+def test_startup_passes_when_broker_positions_known_to_engine():
+    from src.main_engine import TradingEngine
+    eng = TradingEngine.__new__(TradingEngine)
+    eng.alpaca = MagicMock()
+    eng.alpaca.get_positions.return_value = [{"symbol": "AMC", "qty": -100}]
+    eng.risk_manager = MagicMock(positions={"AMC": MagicMock()})
+    # Should not raise - engine already tracks the position
+    eng._reconcile_on_startup()

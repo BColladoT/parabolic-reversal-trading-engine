@@ -249,6 +249,30 @@ class TradingEngine:
             logger.critical("Max errors reached, initiating emergency shutdown")
             self.emergency_shutdown()
     
+    def _reconcile_on_startup(self) -> None:
+        """Refuse to start if the broker has positions the engine doesn't know about.
+
+        Auto-adoption would be unsafe without per-position metadata (stop, target,
+        entry VWAP). Operator must manually flatten or restore engine state instead.
+        """
+        broker_positions = self.alpaca.get_positions() or []
+        if not broker_positions:
+            return
+
+        def _sym(p):
+            # Tolerate both dict and SDK object shapes
+            return p['symbol'] if isinstance(p, dict) else getattr(p, 'symbol', None)
+
+        unknown = [
+            _sym(p) for p in broker_positions
+            if _sym(p) not in self.risk_manager.positions
+        ]
+        if unknown:
+            logger.critical("Startup blocked: broker has positions", symbols=unknown)
+            raise RuntimeError(
+                f"broker has positions not in engine state: {unknown}"
+            )
+
     def _maybe_reset_daily(self, now_et) -> None:
         """Reset daily risk stats once per ET trading day."""
         today = now_et.date()
@@ -303,6 +327,11 @@ class TradingEngine:
     def run(self):
         """Main trading loop."""
         logger.info("Starting trading engine main loop...")
+
+        # Hard safety gate: refuse to start if broker has positions we don't track.
+        # Raises RuntimeError on mismatch - operator must intervene.
+        self._reconcile_on_startup()
+
         self.running = True
         
         # Start WebSocket
