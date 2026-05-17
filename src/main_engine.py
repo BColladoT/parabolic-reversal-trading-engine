@@ -54,6 +54,9 @@ class TradingEngine:
         self.error_count = 0
         self.max_errors = 10
         self.last_health_check = time.time()
+
+        # Daily reset tracking (ET trading day)
+        self._last_reset_date = None
         
         # Setup callbacks
         self._setup_callbacks()
@@ -246,6 +249,15 @@ class TradingEngine:
             logger.critical("Max errors reached, initiating emergency shutdown")
             self.emergency_shutdown()
     
+    def _maybe_reset_daily(self, now_et) -> None:
+        """Reset daily risk stats once per ET trading day."""
+        today = now_et.date()
+        if self._last_reset_date != today:
+            self.risk_manager.reset_daily_stats()
+            self.error_count = 0  # also reset error decay
+            self._last_reset_date = today
+            logger.info("Daily reset complete", date=str(today))
+
     def _is_market_open(self) -> bool:
         """Check if market is currently open."""
         try:
@@ -303,7 +315,11 @@ class TradingEngine:
         try:
             while self.running:
                 now = time.time()
-                
+
+                # Daily reset on new ET trading day
+                now_et = datetime.now(self.market_tz)
+                self._maybe_reset_daily(now_et)
+
                 # Market hours check
                 self.market_open = self._is_market_open()
                 

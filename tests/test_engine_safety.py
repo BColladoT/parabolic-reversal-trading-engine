@@ -42,3 +42,21 @@ def test_execute_entry_aborts_when_daily_limit_hit():
 
     eng.alpaca.submit_short_order.assert_not_called()
     eng.risk_manager.calculate_position_size.assert_not_called()
+
+
+def test_reset_daily_stats_fires_on_new_et_day():
+    from src.main_engine import TradingEngine
+    eng = TradingEngine.__new__(TradingEngine)
+    eng.risk_manager = MagicMock()
+    eng.error_count = 5
+    eng._last_reset_date = None
+
+    fake_now = MagicMock()
+    fake_now.date.return_value = "2026-05-18"
+    eng._maybe_reset_daily(fake_now)
+    eng.risk_manager.reset_daily_stats.assert_called_once()
+    assert eng.error_count == 0
+
+    eng.risk_manager.reset_daily_stats.reset_mock()
+    eng._maybe_reset_daily(fake_now)  # same day -> no second call
+    eng.risk_manager.reset_daily_stats.assert_not_called()
