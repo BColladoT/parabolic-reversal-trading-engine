@@ -74,6 +74,19 @@ class StreamingBuffer:
         self.bar_history: List[BarData] = []
         self.last_bar_time: Optional[datetime] = None
         
+    def reset_session(self) -> None:
+        """Reset VWAP cumulative state at the session boundary.
+
+        VWAP is anchored at the 9:30 ET session open. If we don't clear
+        ``cum_pv`` / ``cum_vol`` between sessions, the running VWAP drifts
+        further from the true session VWAP every day the engine stays up.
+        """
+        with self._lock:
+            self.cum_pv = 0.0
+            self.cum_vol = 0.0
+            self.current_vwap = 0.0
+            self.last_bar_time = None
+
     def add_tick(self, tick: TickData) -> Optional[BarData]:
         """
         Add tick to buffer and return completed bar if new bar formed.
@@ -310,7 +323,16 @@ class PolarsSignalEngine:
         ])
     
     def cleanup_old_data(self, max_age_hours: int = 8):
-        """Clean up old data to prevent memory leaks."""
-        # Reset VWAP state for new sessions
+        """Clean up old data and reset VWAP state at session boundaries.
+
+        Called by the engine's housekeeping loop. Two responsibilities:
+        1. If a buffer's last bar belongs to a previous calendar day, reset
+           its cumulative VWAP state (session-anchored VWAP must restart at
+           9:30 ET each day, not roll over from the prior session).
+        2. Cap bar_history at 200 bars to prevent unbounded memory growth.
+        """
+        today = datetime.now().date()
         for buffer in self.buffers.values():
+            if buffer.last_bar_time is not None and buffer.last_bar_time.date() != today:
+                buffer.reset_session()
             buffer.bar_history = buffer.bar_history[-200:]  # Keep last 200 bars
