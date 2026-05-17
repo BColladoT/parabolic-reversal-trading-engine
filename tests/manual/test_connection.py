@@ -2,6 +2,10 @@
 """Quick connection test to Alpaca."""
 import sys
 import os
+import pytest
+
+pytestmark = pytest.mark.integration
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.data.alpaca_client import AlpacaClient

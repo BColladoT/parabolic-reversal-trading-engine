@@ -2,9 +2,12 @@
 Risk Management & Position Sizing Module - Progressive Scale-In Strategy
 Volatility-based position sizing with progressive entry and layered exits.
 """
+import json
+import os
+from pathlib import Path
 from typing import Dict, Optional, List, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from enum import Enum
 import numpy as np
 
@@ -146,6 +149,45 @@ class RiskManager:
         }
         self.account_equity = 0.0
         self.daily_pnl = 0.0
+
+        # Restore persisted daily state if available (same ET day only)
+        self._restore_daily_state()
+
+    def _state_path(self) -> Path:
+        return Path(os.environ.get("DAILY_STATE_PATH", "data/state/daily_state.json"))
+
+    def _persist_daily_state(self) -> None:
+        """Persist daily PnL + loss-limit-hit flag. Safe to call frequently."""
+        try:
+            p = self._state_path()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps({
+                "date": date.today().isoformat(),
+                "daily_pnl": self.daily_pnl,
+                "daily_loss_limit_hit": self.daily_stats['daily_loss_limit_hit'],
+            }))
+        except Exception as e:  # never let persistence break the engine
+            logger.warning("Failed to persist daily state", error=str(e))
+
+    def _restore_daily_state(self) -> None:
+        """Restore daily PnL + loss-limit flag if state file is from today."""
+        try:
+            p = self._state_path()
+            if not p.exists():
+                return
+            data = json.loads(p.read_text())
+            if data.get("date") == date.today().isoformat():
+                self.daily_pnl = float(data.get("daily_pnl", 0.0))
+                self.daily_stats['daily_loss_limit_hit'] = bool(
+                    data.get("daily_loss_limit_hit", False)
+                )
+                logger.info(
+                    "Daily state restored",
+                    daily_pnl=self.daily_pnl,
+                    loss_limit_hit=self.daily_stats['daily_loss_limit_hit'],
+                )
+        except Exception as e:
+            logger.warning("Failed to restore daily state", error=str(e))
         
     def update_account(self) -> float:
         """Update account equity from broker."""
@@ -167,8 +209,9 @@ class RiskManager:
                 daily_pnl=self.daily_pnl,
                 limit=-daily_loss_limit
             )
+            self._persist_daily_state()
             return True
-        
+
         return False
     
     def check_margin_requirements(self, position_value: float, stock_price: float) -> bool:
@@ -433,9 +476,10 @@ class RiskManager:
             reason=reason,
             remaining=position.get_remaining_shares()
         )
-        
+
+        self._persist_daily_state()
         return pnl
-    
+
     def close_position(self, symbol: str, exit_price: float, reason: str) -> float:
         """Close entire remaining position."""
         if symbol not in self.positions:
@@ -465,7 +509,8 @@ class RiskManager:
             total_pnl=f"${position.realized_pnl:.2f}",
             reason=reason
         )
-        
+
+        self._persist_daily_state()
         return pnl
     
     def check_time_based_exits(self, current_time: datetime, market_close: datetime) -> List[str]:
@@ -542,7 +587,10 @@ class RiskManager:
             k: v for k, v in self.positions.items()
             if v.status != PositionStatus.CLOSED
         }
-        
+
+        # Persist fresh state so a restart later today starts clean too
+        self._persist_daily_state()
+
         logger.info("Daily stats reset")
     
     def emergency_flatten_all(self) -> bool:

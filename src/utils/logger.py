@@ -3,6 +3,7 @@ Structured Logging Module
 Provides JSON-formatted logging for observability and debugging.
 """
 import logging
+import os
 import sys
 from pathlib import Path
 from pythonjsonlogger import jsonlogger
@@ -23,7 +24,8 @@ class TradingLogger:
     def _setup_logger(self):
         """Configure structured JSON logging."""
         self.logger = logging.getLogger("parabolic_reversal")
-        self.logger.setLevel(logging.INFO)
+        level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
+        self.logger.setLevel(getattr(logging, level_name, logging.INFO))
         self.logger.handlers = []
         
         # Ensure logs directory exists

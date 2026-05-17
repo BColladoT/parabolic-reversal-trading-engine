@@ -6,6 +6,9 @@ Validates all components before live deployment.
 import sys
 import os
 import numpy as np
+import pytest
+
+pytestmark = pytest.mark.integration
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 

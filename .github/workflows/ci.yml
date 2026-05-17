@@ -28,7 +28,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest
+          pip install -e ".[test]"
 
-      - name: Run pytest
-        run: pytest tests/ -v
+      - name: Run unit tests with coverage
+        run: pytest tests/ -m "not integration and not slow" -v --cov=src --cov-report=term --cov-fail-under=20
+
+      - name: Verify integration tests collect
+        run: pytest tests/ -m "integration" --collect-only

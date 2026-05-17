@@ -54,6 +54,11 @@ class TradingEngine:
         self.error_count = 0
         self.max_errors = 10
         self.last_health_check = time.time()
+        self._last_error_time = 0.0
+        self._error_decay_seconds = 3600  # decay error_count after 1h clean
+
+        # Daily reset tracking (ET trading day)
+        self._last_reset_date = None
         
         # Setup callbacks
         self._setup_callbacks()
@@ -110,12 +115,21 @@ class TradingEngine:
     def _execute_entry(self, signal: TradeSignal):
         """Execute short entry."""
         symbol = signal.symbol
-        
+
+        # Hard circuit breaker - refuse all new entries once daily loss limit hit
+        if self.risk_manager.check_daily_loss_limit():
+            logger.critical(
+                "Entry refused: daily loss limit tripped",
+                symbol=symbol,
+                daily_pnl=self.risk_manager.daily_pnl,
+            )
+            return
+
         # Check if already in position
         if symbol in self.risk_manager.positions:
             logger.info(f"Already in position for {symbol}, skipping entry")
             return
-        
+
         # Get metrics for position sizing
         metrics = self.data_engine.get_signal_data(symbol)
         
@@ -231,18 +245,69 @@ class TradingEngine:
     def _handle_error(self, error: Exception):
         """Handle errors with self-healing logic."""
         self.error_count += 1
+        self._last_error_time = time.time()
         logger.error(f"Error {self.error_count}/{self.max_errors}: {error}")
-        
+
         if self.error_count >= self.max_errors:
             logger.critical("Max errors reached, initiating emergency shutdown")
             self.emergency_shutdown()
+
+    def _maybe_decay_errors(self) -> None:
+        """Reset error_count after a clean window (default: 1 hour)."""
+        if self.error_count == 0:
+            return
+        decay_seconds = getattr(self, "_error_decay_seconds", 3600)
+        last_error = getattr(self, "_last_error_time", 0.0)
+        if (time.time() - last_error) >= decay_seconds:
+            logger.info(
+                "Error count decayed after clean window",
+                previous=self.error_count,
+            )
+            self.error_count = 0
     
+    def _reconcile_on_startup(self) -> None:
+        """Refuse to start if the broker has positions the engine doesn't know about.
+
+        Auto-adoption would be unsafe without per-position metadata (stop, target,
+        entry VWAP). Operator must manually flatten or restore engine state instead.
+        """
+        broker_positions = self.alpaca.get_positions() or []
+        if not broker_positions:
+            return
+
+        def _sym(p):
+            # Tolerate both dict and SDK object shapes
+            return p['symbol'] if isinstance(p, dict) else getattr(p, 'symbol', None)
+
+        unknown = [
+            _sym(p) for p in broker_positions
+            if _sym(p) not in self.risk_manager.positions
+        ]
+        if unknown:
+            logger.critical("Startup blocked: broker has positions", symbols=unknown)
+            raise RuntimeError(
+                f"broker has positions not in engine state: {unknown}"
+            )
+
+    def _maybe_reset_daily(self, now_et) -> None:
+        """Reset daily risk stats once per ET trading day."""
+        today = now_et.date()
+        if self._last_reset_date != today:
+            self.risk_manager.reset_daily_stats()
+            self.error_count = 0  # also reset error decay
+            self._last_reset_date = today
+            logger.info("Daily reset complete", date=str(today))
+
     def _is_market_open(self) -> bool:
         """Check if market is currently open."""
         try:
             clock = self.alpaca.trading_client.get_clock()
             return clock.is_open
-        except:
+        except (ConnectionError, TimeoutError, OSError) as e:
+            logger.warning(
+                "Alpaca clock unavailable, falling back to time-based check",
+                error=str(e),
+            )
             # Fallback to time-based check
             now_et = datetime.now(self.market_tz)
             market_open = now_et.replace(hour=9, minute=30, second=0)
@@ -282,6 +347,11 @@ class TradingEngine:
     def run(self):
         """Main trading loop."""
         logger.info("Starting trading engine main loop...")
+
+        # Hard safety gate: refuse to start if broker has positions we don't track.
+        # Raises RuntimeError on mismatch - operator must intervene.
+        self._reconcile_on_startup()
+
         self.running = True
         
         # Start WebSocket
@@ -294,7 +364,14 @@ class TradingEngine:
         try:
             while self.running:
                 now = time.time()
-                
+
+                # Daily reset on new ET trading day
+                now_et = datetime.now(self.market_tz)
+                self._maybe_reset_daily(now_et)
+
+                # Decay error count after a clean window
+                self._maybe_decay_errors()
+
                 # Market hours check
                 self.market_open = self._is_market_open()
                 
@@ -394,8 +471,8 @@ class TradingEngine:
         # Stop WebSocket
         try:
             self.alpaca.stop_websocket()
-        except:
-            pass
+        except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
+            logger.warning("WebSocket stop failed during shutdown", error=str(e))
         
         self.running = False
         logger.critical("Emergency shutdown complete")

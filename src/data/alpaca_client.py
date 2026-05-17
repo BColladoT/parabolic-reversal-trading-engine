@@ -5,6 +5,7 @@ WebSocket streaming and REST API integration for real-time data and order execut
 import asyncio
 import json
 import os
+import random
 from typing import Callable, Dict, Set, Optional
 from datetime import datetime
 import threading
@@ -19,6 +20,17 @@ from alpaca.data.live.stock import StockDataStream
 from src.utils.config import CONFIG
 from src.utils.logger import logger
 from src.data.polars_engine import TickData
+
+
+def compute_backoff(attempt: int, base: float = 1.0, cap: float = 60.0) -> float:
+    """Exponential backoff with full jitter: ``random.uniform(0, min(base * 2**attempt, cap))``.
+
+    Used by :meth:`AlpacaClient._ws_handler` to space reconnect attempts under
+    "thundering herd" conditions (e.g. broker outage recovery). The full-jitter
+    strategy is from the AWS architecture blog post on retries.
+    """
+    expo = min(base * (2 ** max(0, int(attempt))), cap)
+    return random.uniform(0, expo)
 
 
 class AlpacaClient:
@@ -56,7 +68,49 @@ class AlpacaClient:
         self.last_message_time = time.time()
         self.reconnect_delay = CONFIG.performance.reconnect_delay_seconds
         self.max_reconnect_delay = 60
-        
+        self._reconnect_attempt = 0
+
+    # ==================== Reliability Primitives ====================
+
+    def is_feed_stale(self, max_age_s: int = 30) -> bool:
+        """True if no WebSocket message has been received within ``max_age_s`` seconds."""
+        return (time.time() - self.last_message_time) > max_age_s
+
+    def poll_fill(
+        self,
+        order_id: str,
+        timeout_s: float = 10.0,
+        interval_s: float = 0.5,
+    ) -> dict:
+        """Poll Alpaca for order status until it reaches a terminal state or ``timeout_s`` elapses.
+
+        Returns a dict with ``status``, ``filled_qty``, ``filled_avg_price``.
+        On exception or timeout, returns the last observed state (or a
+        ``status="unknown"`` placeholder if no observation was made).
+        """
+        deadline = time.time() + timeout_s
+        last: Optional[Dict] = None
+        terminal = ("filled", "canceled", "rejected", "expired")
+        while time.time() < deadline:
+            try:
+                order = self.trading_client.get_order_by_id(order_id)
+                raw_status = order.status
+                if hasattr(raw_status, "name"):
+                    status_str = raw_status.name.lower()
+                else:
+                    status_str = str(raw_status).split(".")[-1].lower()
+                last = {
+                    "status": status_str,
+                    "filled_qty": int(float(order.filled_qty or 0)),
+                    "filled_avg_price": float(order.filled_avg_price or 0.0),
+                }
+                if last["status"] in terminal:
+                    return last
+            except Exception as e:
+                logger.warning("poll_fill error", order_id=order_id, error=str(e))
+            time.sleep(interval_s)
+        return last or {"status": "unknown", "filled_qty": 0, "filled_avg_price": 0.0}
+
     # ==================== REST API Methods ====================
     
     def get_account(self) -> dict:
@@ -125,12 +179,20 @@ class AlpacaClient:
         symbol: str,
         qty: int,
         limit_price: Optional[float] = None,
-        time_in_force: str = "ioc"
+        time_in_force: str = "ioc",
+        client_order_id: Optional[str] = None,
     ) -> Dict:
         """
         Submit a short sell order.
         Uses limit orders by default to control slippage.
+
+        ``client_order_id`` provides idempotency — Alpaca rejects duplicate
+        submissions sharing the same client_order_id. If not supplied, we
+        autogenerate ``f"{symbol}-{int(time.time()*1000)}"`` so that an
+        accidental retry within the same millisecond is still deduped.
         """
+        if client_order_id is None:
+            client_order_id = f"{symbol}-{int(time.time() * 1000)}"
         try:
             if limit_price:
                 order_data = LimitOrderRequest(
@@ -138,49 +200,60 @@ class AlpacaClient:
                     qty=qty,
                     side=OrderSide.SELL,
                     limit_price=limit_price,
-                    time_in_force=TimeInForce.IOC if time_in_force == "ioc" else TimeInForce.DAY
+                    time_in_force=TimeInForce.IOC if time_in_force == "ioc" else TimeInForce.DAY,
+                    client_order_id=client_order_id,
                 )
             else:
                 order_data = MarketOrderRequest(
                     symbol=symbol,
                     qty=qty,
                     side=OrderSide.SELL,
-                    time_in_force=TimeInForce.IOC
+                    time_in_force=TimeInForce.IOC,
+                    client_order_id=client_order_id,
                 )
-            
+
             order = self.trading_client.submit_order(order_data=order_data)
-            
+
             logger.info(
                 f"Short order submitted",
                 symbol=symbol,
                 qty=qty,
                 limit_price=limit_price,
-                order_id=order.id
+                order_id=order.id,
+                client_order_id=client_order_id,
             )
-            
+
             return {
                 'success': True,
                 'order_id': order.id,
                 'status': order.status,
                 'symbol': symbol,
-                'qty': qty
+                'qty': qty,
+                'client_order_id': client_order_id,
             }
-            
+
         except Exception as e:
             logger.error(f"Failed to submit short order for {symbol}: {e}")
             return {
                 'success': False,
                 'error': str(e),
-                'symbol': symbol
+                'symbol': symbol,
+                'client_order_id': client_order_id,
             }
     
     def submit_cover_order(
         self,
         symbol: str,
         qty: int,
-        limit_price: Optional[float] = None
+        limit_price: Optional[float] = None,
+        client_order_id: Optional[str] = None,
     ) -> Dict:
-        """Submit a buy-to-cover order."""
+        """Submit a buy-to-cover order.
+
+        ``client_order_id`` provides idempotency; autogenerated when missing.
+        """
+        if client_order_id is None:
+            client_order_id = f"{symbol}-cover-{int(time.time() * 1000)}"
         try:
             if limit_price:
                 order_data = LimitOrderRequest(
@@ -188,36 +261,41 @@ class AlpacaClient:
                     qty=qty,
                     side=OrderSide.BUY,
                     limit_price=limit_price,
-                    time_in_force=TimeInForce.IOC
+                    time_in_force=TimeInForce.IOC,
+                    client_order_id=client_order_id,
                 )
             else:
                 order_data = MarketOrderRequest(
                     symbol=symbol,
                     qty=qty,
                     side=OrderSide.BUY,
-                    time_in_force=TimeInForce.IOC
+                    time_in_force=TimeInForce.IOC,
+                    client_order_id=client_order_id,
                 )
-            
+
             order = self.trading_client.submit_order(order_data=order_data)
-            
+
             logger.info(
                 f"Cover order submitted",
                 symbol=symbol,
                 qty=qty,
-                order_id=order.id
+                order_id=order.id,
+                client_order_id=client_order_id,
             )
-            
+
             return {
                 'success': True,
                 'order_id': order.id,
-                'status': order.status
+                'status': order.status,
+                'client_order_id': client_order_id,
             }
-            
+
         except Exception as e:
             logger.error(f"Failed to submit cover order for {symbol}: {e}")
             return {
                 'success': False,
-                'error': str(e)
+                'error': str(e),
+                'client_order_id': client_order_id,
             }
     
     def close_all_positions(self) -> Dict:
@@ -259,11 +337,13 @@ class AlpacaClient:
             if resp_data and len(resp_data) > 0:
                 if resp_data[0].get("msg") == "authenticated":
                     logger.info("WebSocket authenticated successfully")
+                    # Reset reconnect attempt counter on successful auth.
+                    self._reconnect_attempt = 0
                     return True
                 else:
                     logger.error(f"WebSocket auth failed: {resp_data}")
                     return False
-            
+
             return True
             
         except Exception as e:
@@ -300,28 +380,52 @@ class AlpacaClient:
                     success = await self._ws_connect()
                     if success and self.subscribed_symbols:
                         await self._ws_subscribe(self.subscribed_symbols)
-                    await asyncio.sleep(self.reconnect_delay)
+                    # Exponential backoff with full jitter on reconnect path.
+                    self._reconnect_attempt = getattr(self, "_reconnect_attempt", 0) + 1
+                    delay = compute_backoff(
+                        self._reconnect_attempt,
+                        base=self.reconnect_delay,
+                        cap=self.max_reconnect_delay,
+                    )
+                    logger.info(
+                        "WebSocket backoff",
+                        attempt=self._reconnect_attempt,
+                        delay=delay,
+                    )
+                    await asyncio.sleep(delay)
                     continue
-                
+
                 message = await self.ws.recv()
                 self.last_message_time = time.time()
-                
+
                 # Parse message
                 data = json.loads(message)
-                
+
                 if isinstance(data, list):
                     for item in data:
                         await self._process_message(item)
                 else:
                     await self._process_message(data)
-                    
+
             except websockets.exceptions.ConnectionClosed:
                 logger.warning("WebSocket connection closed, reconnecting...")
                 self.ws = None
-                await asyncio.sleep(self.reconnect_delay)
+                self._reconnect_attempt = getattr(self, "_reconnect_attempt", 0) + 1
+                delay = compute_backoff(
+                    self._reconnect_attempt,
+                    base=self.reconnect_delay,
+                    cap=self.max_reconnect_delay,
+                )
+                await asyncio.sleep(delay)
             except Exception as e:
                 logger.error(f"WebSocket error: {e}")
-                await asyncio.sleep(self.reconnect_delay)
+                self._reconnect_attempt = getattr(self, "_reconnect_attempt", 0) + 1
+                delay = compute_backoff(
+                    self._reconnect_attempt,
+                    base=self.reconnect_delay,
+                    cap=self.max_reconnect_delay,
+                )
+                await asyncio.sleep(delay)
     
     async def _process_message(self, data: dict):
         """Process incoming WebSocket message."""
