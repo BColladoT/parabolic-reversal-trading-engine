@@ -174,6 +174,8 @@ class QuickWFOTrainer:
                     "max_position_capital_fraction": getattr(self.config, '_max_pos_fraction', 0.30),
                     "min_vwap_deviation_entry": getattr(self.config, '_vwap_threshold', 20.0),
                     "transaction_cost_per_dollar": getattr(self.config, '_txn_cost', 0.003),
+                    "r_multiple_reward_weight": getattr(self.config, '_r_multiple_reward_weight', 0.0),
+                    "r_multiple_reward_clip": getattr(self.config, '_r_multiple_reward_clip', 5.0),
                     "trades_log_path": str(Path(self.config.output_dir).resolve() / "trades.jsonl"),
                     "dashboard_fold": fold,
                 },
@@ -926,6 +928,14 @@ def main():
     parser.add_argument('--max-pos-fraction', type=float, default=0.30)
     parser.add_argument('--vwap-threshold', type=float, default=15.0)
     parser.add_argument('--txn-cost', type=float, default=0.003)
+    parser.add_argument(
+        "--r-multiple-reward-weight", type=float, default=0.0,
+        help="Per-trade R-multiple reward term weight (0.0 = disabled, matches pre-batch behavior).",
+    )
+    parser.add_argument(
+        "--r-multiple-reward-clip", type=float, default=5.0,
+        help="Per-trade R-multiple clip magnitude before scaling.",
+    )
     parser.add_argument('--eval-episodes', type=int, default=50,
                         help='Number of evaluation episodes (default: 50)')
 
@@ -962,6 +972,8 @@ def main():
     config._max_pos_fraction = args.max_pos_fraction
     config._vwap_threshold = args.vwap_threshold
     config._txn_cost = args.txn_cost
+    config._r_multiple_reward_weight = args.r_multiple_reward_weight
+    config._r_multiple_reward_clip = args.r_multiple_reward_clip
 
     trainer = QuickWFOTrainer(config)
     results = trainer.run()
