@@ -5,6 +5,7 @@ WebSocket streaming and REST API integration for real-time data and order execut
 import asyncio
 import json
 import os
+import random
 from typing import Callable, Dict, Set, Optional
 from datetime import datetime
 import threading
@@ -19,6 +20,17 @@ from alpaca.data.live.stock import StockDataStream
 from src.utils.config import CONFIG
 from src.utils.logger import logger
 from src.data.polars_engine import TickData
+
+
+def compute_backoff(attempt: int, base: float = 1.0, cap: float = 60.0) -> float:
+    """Exponential backoff with full jitter: ``random.uniform(0, min(base * 2**attempt, cap))``.
+
+    Used by :meth:`AlpacaClient._ws_handler` to space reconnect attempts under
+    "thundering herd" conditions (e.g. broker outage recovery). The full-jitter
+    strategy is from the AWS architecture blog post on retries.
+    """
+    expo = min(base * (2 ** max(0, int(attempt))), cap)
+    return random.uniform(0, expo)
 
 
 class AlpacaClient:
@@ -266,11 +278,13 @@ class AlpacaClient:
             if resp_data and len(resp_data) > 0:
                 if resp_data[0].get("msg") == "authenticated":
                     logger.info("WebSocket authenticated successfully")
+                    # Reset reconnect attempt counter on successful auth.
+                    self._reconnect_attempt = 0
                     return True
                 else:
                     logger.error(f"WebSocket auth failed: {resp_data}")
                     return False
-            
+
             return True
             
         except Exception as e:
@@ -307,28 +321,52 @@ class AlpacaClient:
                     success = await self._ws_connect()
                     if success and self.subscribed_symbols:
                         await self._ws_subscribe(self.subscribed_symbols)
-                    await asyncio.sleep(self.reconnect_delay)
+                    # Exponential backoff with full jitter on reconnect path.
+                    self._reconnect_attempt = getattr(self, "_reconnect_attempt", 0) + 1
+                    delay = compute_backoff(
+                        self._reconnect_attempt,
+                        base=self.reconnect_delay,
+                        cap=self.max_reconnect_delay,
+                    )
+                    logger.info(
+                        "WebSocket backoff",
+                        attempt=self._reconnect_attempt,
+                        delay=delay,
+                    )
+                    await asyncio.sleep(delay)
                     continue
-                
+
                 message = await self.ws.recv()
                 self.last_message_time = time.time()
-                
+
                 # Parse message
                 data = json.loads(message)
-                
+
                 if isinstance(data, list):
                     for item in data:
                         await self._process_message(item)
                 else:
                     await self._process_message(data)
-                    
+
             except websockets.exceptions.ConnectionClosed:
                 logger.warning("WebSocket connection closed, reconnecting...")
                 self.ws = None
-                await asyncio.sleep(self.reconnect_delay)
+                self._reconnect_attempt = getattr(self, "_reconnect_attempt", 0) + 1
+                delay = compute_backoff(
+                    self._reconnect_attempt,
+                    base=self.reconnect_delay,
+                    cap=self.max_reconnect_delay,
+                )
+                await asyncio.sleep(delay)
             except Exception as e:
                 logger.error(f"WebSocket error: {e}")
-                await asyncio.sleep(self.reconnect_delay)
+                self._reconnect_attempt = getattr(self, "_reconnect_attempt", 0) + 1
+                delay = compute_backoff(
+                    self._reconnect_attempt,
+                    base=self.reconnect_delay,
+                    cap=self.max_reconnect_delay,
+                )
+                await asyncio.sleep(delay)
     
     async def _process_message(self, data: dict):
         """Process incoming WebSocket message."""
