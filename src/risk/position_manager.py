@@ -66,7 +66,11 @@ class Position:
     entry_time: datetime = field(default_factory=datetime.now)
     status: PositionStatus = PositionStatus.PENDING
     max_exposure: float = 0.0
-    
+
+    # Feature snapshot captured at signal-emission time. Persisted to the trade journal
+    # on close so the edge estimator can compute conditional win-rates downstream.
+    entry_features: Dict[str, float] = field(default_factory=dict)
+
     def add_entry(self, price: float, shares: int, add_level: int):
         """Add an entry to this position (scale-in)."""
         self.entries.append({
@@ -343,9 +347,10 @@ class RiskManager:
     
     def open_position(self, symbol: str, entry_price: float, qty: int,
                       stop_loss: float, vwap: float, day_high: float,
-                      add_level: int = 1) -> Position:
+                      add_level: int = 1,
+                      entry_features: Optional[Dict[str, float]] = None) -> Position:
         """Open or add to a position."""
-        
+
         if symbol not in self.positions:
             # New position
             position = Position(
@@ -355,7 +360,8 @@ class RiskManager:
                 vwap_entry=vwap,
                 parabolic_apex=day_high,
                 status=PositionStatus.BUILDING,
-                max_exposure=qty * entry_price
+                max_exposure=qty * entry_price,
+                entry_features=dict(entry_features or {}),
             )
             self.positions[symbol] = position
         else:
