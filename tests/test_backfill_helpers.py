@@ -84,3 +84,32 @@ def test_trades_from_engine_result_handles_multi_leg_scale_in():
     assert t.entry_time == datetime(2021, 6, 2, 10, 30)  # earliest entry
     # vwap_extension uses the FIRST entry's value (signal of initial setup quality)
     assert t.vwap_extension == 0.18
+
+
+# --- Task A1.2: ATR over 1-min bars --------------------------------------
+
+def test_atr_pct_at_basic():
+    from src.scripts.backfill_helpers import atr_pct_at
+    start = datetime(2021, 6, 2, 10, 0)
+    bars = _make_bars(start, n=20, true_range=0.10)
+    target = start + timedelta(minutes=15)
+    atr = atr_pct_at(bars, target, window=14)
+    # high-low = 0.20 always, close=10.0 -> atr_pct = 0.20 / 10.0 = 0.02
+    assert atr == pytest.approx(0.02, abs=1e-3)
+
+
+def test_atr_pct_at_returns_zero_when_insufficient_bars():
+    from src.scripts.backfill_helpers import atr_pct_at
+    start = datetime(2021, 6, 2, 10, 0)
+    bars = _make_bars(start, n=3)
+    target = start + timedelta(minutes=2)
+    assert atr_pct_at(bars, target, window=14) == 0.0
+
+
+def test_atr_pct_at_empty_frame_returns_zero():
+    from src.scripts.backfill_helpers import atr_pct_at
+    empty = pl.DataFrame(
+        schema={"timestamp": pl.Datetime, "open": pl.Float64,
+                "high": pl.Float64, "low": pl.Float64, "close": pl.Float64}
+    )
+    assert atr_pct_at(empty, datetime(2021, 6, 2, 10, 0), window=14) == 0.0

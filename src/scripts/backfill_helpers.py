@@ -138,3 +138,24 @@ def trades_from_engine_result(result: Any, setup_symbol: str) -> list[BacktestTr
                 open_legs.append(rec)
 
     return trades
+
+
+def atr_pct_at(bars: pl.DataFrame, ts: datetime, window: int = 14) -> float:
+    """ATR-as-percent over ``window`` 1-min bars ending at ``ts``.
+
+    Uses the simple ``mean(high - low)`` true-range proxy (no prev-close
+    gap component) — sufficient for journal feature snapshots and avoids
+    pulling in numba. Returns ``0.0`` when there are fewer than ``window``
+    bars available or when the anchor close is non-positive; downstream
+    consumers tolerate the 0.0 sentinel.
+    """
+    if bars.is_empty():
+        return 0.0
+    window_bars = bars.filter(pl.col("timestamp") <= ts).tail(window)
+    if window_bars.shape[0] < window:
+        return 0.0
+    tr = (window_bars["high"] - window_bars["low"]).mean()
+    close_at = float(window_bars["close"].item(-1))
+    if close_at <= 0:
+        return 0.0
+    return float(tr) / close_at
