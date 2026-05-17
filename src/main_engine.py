@@ -181,7 +181,8 @@ class TradingEngine:
                 stop_loss=sizing['stop_loss'],
                 profit_target=sizing['profit_target'],
                 vwap=signal.vwap,
-                parabolic_apex=sizing['stop_loss']  # Use stop as apex proxy
+                parabolic_apex=sizing['stop_loss'],  # Use stop as apex proxy
+                entry_features=getattr(signal, "features", None),  # tolerate older signals without this field
             )
             
             logger.info(
