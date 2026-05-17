@@ -56,7 +56,14 @@ class AlpacaClient:
         self.last_message_time = time.time()
         self.reconnect_delay = CONFIG.performance.reconnect_delay_seconds
         self.max_reconnect_delay = 60
-        
+        self._reconnect_attempt = 0
+
+    # ==================== Reliability Primitives ====================
+
+    def is_feed_stale(self, max_age_s: int = 30) -> bool:
+        """True if no WebSocket message has been received within ``max_age_s`` seconds."""
+        return (time.time() - self.last_message_time) > max_age_s
+
     # ==================== REST API Methods ====================
     
     def get_account(self) -> dict:
