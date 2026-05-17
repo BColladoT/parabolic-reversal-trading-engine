@@ -64,3 +64,6 @@ scratch/
 *.docx
 *.doc
 *.xlsx
+
+# Trade journal: per-day parquet files. Not source code, never commit.
+data/trade_journal/*.parquet

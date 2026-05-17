@@ -15,6 +15,7 @@ from src.utils.config import CONFIG
 from src.utils.logger import logger
 from src.data.alpaca_client import AlpacaClient
 from src.indicators.numba_kernels import calculate_position_size_numba
+from src.risk.trade_journal import append_trade
 
 
 class PositionStatus(Enum):
@@ -66,7 +67,11 @@ class Position:
     entry_time: datetime = field(default_factory=datetime.now)
     status: PositionStatus = PositionStatus.PENDING
     max_exposure: float = 0.0
-    
+
+    # Feature snapshot captured at signal-emission time. Persisted to the trade journal
+    # on close so the edge estimator can compute conditional win-rates downstream.
+    entry_features: Dict[str, float] = field(default_factory=dict)
+
     def add_entry(self, price: float, shares: int, add_level: int):
         """Add an entry to this position (scale-in)."""
         self.entries.append({
@@ -246,15 +251,45 @@ class RiskManager:
                                 add_level: int = 1) -> Dict:
         """
         Calculate position size for initial entry or scale-in.
-        
+
         Scale-In Sizing:
         - Add 1 (Initial): 25% of max position
-        - Add 2: 25% of max position  
+        - Add 2: 25% of max position
         - Add 3: 50% of max position
+
+        Edge-aware sizing (additive, best-effort):
+        - When the journal has >= 20 trades AND quarter-Kelly >= KELLY_MIN_FRACTION,
+          shares are sized from Kelly * equity (subject to existing value and
+          share-count ceilings).
+        - Otherwise we fall back to the existing fixed-% baseline.
+        - A drawdown modifier (1.0 -> 0.5 after 3 losses -> 0.25 after 5+)
+          scales whichever path was taken.
+        - On any failure inside the edge path we silently use the fixed-% logic.
         """
+        # Edge-aware sizing inputs (best-effort; falls back silently to fixed-%)
+        from src.risk.edge_estimator import compute_edge, consecutive_losses
+        try:
+            features = {
+                "feat_vwap_extension": (entry_price - vwap) / vwap if vwap else 0.0,
+                "feat_atr_pct": (atr / entry_price) if entry_price else 0.0,
+            }
+            edge = compute_edge(features=features)
+            losses_streak = consecutive_losses(lookback_trades=10)
+        except Exception:
+            edge = None
+            losses_streak = 0
+
+        # Drawdown modifier: 1.0 nominal, 0.5 after 3 consecutive losses, 0.25 after 5+
+        if losses_streak >= 5:
+            dd_modifier = 0.25
+        elif losses_streak >= 3:
+            dd_modifier = 0.5
+        else:
+            dd_modifier = 1.0
+
         # Update account
         self.update_account()
-        
+
         # Check daily loss limit
         if self.check_daily_loss_limit():
             return {'shares': 0, 'valid': False, 'reason': 'daily_loss_limit'}
@@ -324,12 +359,27 @@ class RiskManager:
         if shares <= 0:
             return {'shares': 0, 'valid': False, 'reason': 'zero_shares'}
         
+        # Edge-aware sizing: when we have a meaningful sample AND meaningful Kelly,
+        # size from Kelly * equity (still subject to the existing hard ceilings).
+        # Otherwise fall back to the fixed-% baseline. Both paths get the drawdown
+        # modifier applied.
+        KELLY_MIN_FRACTION = 0.05
+        if edge is not None and edge.n_trades >= 20 and edge.kelly_fraction >= KELLY_MIN_FRACTION:
+            kelly_dollar_risk = self.account_equity * edge.kelly_fraction * dd_modifier
+            shares = int(kelly_dollar_risk / max(risk_per_share, 1e-6))
+            shares = min(shares, max_shares_by_value, CONFIG.scaling.max_shares_per_position)
+        else:
+            shares = int(shares * dd_modifier)
+
+        if shares <= 0:
+            return {'shares': 0, 'valid': False, 'reason': 'zero_shares'}
+
         position_value = shares * entry_price
-        
+
         # Check margin requirements
         if not self.check_margin_requirements(position_value, entry_price):
             return {'shares': 0, 'valid': False, 'reason': 'margin'}
-        
+
         return {
             'shares': shares,
             'valid': True,
@@ -338,14 +388,18 @@ class RiskManager:
             'risk_per_share': risk_per_share,
             'total_risk': risk_per_share * shares,
             'position_value': position_value,
-            'add_level': add_level
+            'add_level': add_level,
+            'kelly_fraction': edge.kelly_fraction if edge is not None else 0.0,
+            'edge_n_trades': edge.n_trades if edge is not None else 0,
+            'dd_modifier': dd_modifier,
         }
     
     def open_position(self, symbol: str, entry_price: float, qty: int,
                       stop_loss: float, vwap: float, day_high: float,
-                      add_level: int = 1) -> Position:
+                      add_level: int = 1,
+                      entry_features: Optional[Dict[str, float]] = None) -> Position:
         """Open or add to a position."""
-        
+
         if symbol not in self.positions:
             # New position
             position = Position(
@@ -355,7 +409,8 @@ class RiskManager:
                 vwap_entry=vwap,
                 parabolic_apex=day_high,
                 status=PositionStatus.BUILDING,
-                max_exposure=qty * entry_price
+                max_exposure=qty * entry_price,
+                entry_features=dict(entry_features or {}),
             )
             self.positions[symbol] = position
         else:
@@ -509,6 +564,36 @@ class RiskManager:
             total_pnl=f"${position.realized_pnl:.2f}",
             reason=reason
         )
+
+        # Best-effort journal write. A failure here must never block trade closure.
+        try:
+            initial_risk_per_share = abs(position.stop_loss - position.entry_price_avg)
+            initial_risk = initial_risk_per_share * remaining_shares
+            r_multiple = (pnl / initial_risk) if initial_risk > 0 else 0.0
+            hold_seconds = int((datetime.now() - position.entry_time).total_seconds())
+            feats = position.entry_features or {}
+            append_trade({
+                "symbol": symbol,
+                "entry_time": position.entry_time,
+                "exit_time": datetime.now(),
+                "entry_price": float(position.entry_price_avg),
+                "exit_price": float(exit_price),
+                "shares": int(remaining_shares),
+                "side": position.side,
+                "pnl": float(pnl),
+                "r_multiple": float(r_multiple),
+                "hold_seconds": hold_seconds,
+                "exit_reason": reason,
+                "win": bool(pnl > 0),
+                "feat_vwap_extension": float(feats.get("vwap_extension", 0.0)),
+                "feat_volume_ratio": float(feats.get("volume_ratio", 0.0)),
+                "feat_atr_pct": float(feats.get("atr_pct", 0.0)),
+                "feat_time_of_day_min": float(feats.get("time_of_day_min", 0.0)),
+                "feat_day_of_week": float(feats.get("day_of_week", 0.0)),
+                "feat_factors_count": float(feats.get("factors_count", 0.0)),
+            })
+        except Exception as e:
+            logger.warning("trade journal append failed", error=str(e), symbol=symbol)
 
         self._persist_daily_state()
         return pnl
