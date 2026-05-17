@@ -76,6 +76,41 @@ class AlpacaClient:
         """True if no WebSocket message has been received within ``max_age_s`` seconds."""
         return (time.time() - self.last_message_time) > max_age_s
 
+    def poll_fill(
+        self,
+        order_id: str,
+        timeout_s: float = 10.0,
+        interval_s: float = 0.5,
+    ) -> dict:
+        """Poll Alpaca for order status until it reaches a terminal state or ``timeout_s`` elapses.
+
+        Returns a dict with ``status``, ``filled_qty``, ``filled_avg_price``.
+        On exception or timeout, returns the last observed state (or a
+        ``status="unknown"`` placeholder if no observation was made).
+        """
+        deadline = time.time() + timeout_s
+        last: Optional[Dict] = None
+        terminal = ("filled", "canceled", "rejected", "expired")
+        while time.time() < deadline:
+            try:
+                order = self.trading_client.get_order_by_id(order_id)
+                raw_status = order.status
+                if hasattr(raw_status, "name"):
+                    status_str = raw_status.name.lower()
+                else:
+                    status_str = str(raw_status).split(".")[-1].lower()
+                last = {
+                    "status": status_str,
+                    "filled_qty": int(float(order.filled_qty or 0)),
+                    "filled_avg_price": float(order.filled_avg_price or 0.0),
+                }
+                if last["status"] in terminal:
+                    return last
+            except Exception as e:
+                logger.warning("poll_fill error", order_id=order_id, error=str(e))
+            time.sleep(interval_s)
+        return last or {"status": "unknown", "filled_qty": 0, "filled_avg_price": 0.0}
+
     # ==================== REST API Methods ====================
     
     def get_account(self) -> dict:

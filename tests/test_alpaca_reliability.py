@@ -44,3 +44,22 @@ def test_reconnect_delay_doubles_with_jitter():
     upper_attempt0 = max(compute_backoff(0, base=1.0, cap=60.0) for _ in range(200))
     upper_attempt5 = max(compute_backoff(5, base=1.0, cap=60.0) for _ in range(200))
     assert upper_attempt5 > upper_attempt0
+
+
+def test_poll_fill_returns_filled_state():
+    c = AlpacaClient.__new__(AlpacaClient)
+    fake_order = MagicMock(status="filled", filled_qty="100", filled_avg_price="9.95")
+    c.trading_client = MagicMock()
+    c.trading_client.get_order_by_id.return_value = fake_order
+    result = c.poll_fill("order-123", timeout_s=1)
+    assert result == {"status": "filled", "filled_qty": 100, "filled_avg_price": 9.95}
+
+
+def test_poll_fill_timeout_returns_partial_state():
+    c = AlpacaClient.__new__(AlpacaClient)
+    fake_order = MagicMock(status="partially_filled", filled_qty="50", filled_avg_price="9.90")
+    c.trading_client = MagicMock()
+    c.trading_client.get_order_by_id.return_value = fake_order
+    result = c.poll_fill("order-123", timeout_s=1)
+    assert result["status"] == "partially_filled"
+    assert result["filled_qty"] == 50
