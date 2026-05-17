@@ -1323,8 +1323,9 @@ class ParabolicReversalEnv(gym.Env):
         # 4) TCN-AE latent encoding
         # ------------------------------------------------------------------
         with torch.no_grad():
-            x = torch.FloatTensor(ohlcv_tensor).unsqueeze(0)  # [1, 5, 60]
-            latent = self.perception_model.encoder(x).squeeze(0).numpy()  # [64]
+            device = next(self.perception_model.encoder.parameters()).device
+            x = torch.FloatTensor(ohlcv_tensor).unsqueeze(0).to(device)  # [1, 5, 60]
+            latent = self.perception_model.encoder(x).squeeze(0).cpu().numpy()  # [64]
 
         # ------------------------------------------------------------------
         # 5) Explicit features (10 dims)

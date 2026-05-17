@@ -23,6 +23,7 @@ import concurrent.futures
 # processes deadlock on uninitialized mutexes without this flag.
 os.environ["POLARS_ALLOW_FORKING_THREAD"] = "1"
 
+import torch  # MUST be imported before ray on Windows — see train_wfo_quick_test.py for explanation
 import ray
 from ray import tune
 from ray.rllib.algorithms.sac import SACConfig
@@ -864,7 +865,6 @@ class WalkForwardRLlibTrainer:
                     "r_multiple_reward_weight": getattr(self.config, '_r_multiple_reward_weight', 0.0),
                     "r_multiple_reward_clip": getattr(self.config, '_r_multiple_reward_clip', 5.0),
                 },
-                disable_env_checking=True,
             )
             .framework("torch")
             .training(
