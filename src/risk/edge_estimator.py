@@ -1,7 +1,7 @@
 """Conditional edge estimator. Reads the trade journal, returns Kelly-capped stats.
 
 Public API (consumed by RiskManager.calculate_position_size in Agent A3):
-    compute_edge(features=None, lookback_days=90, min_samples_conditional=20)
+    compute_edge(features=None, lookback_days=365, min_samples_conditional=20)
         -> EdgeStats
     consecutive_losses(lookback_trades=10) -> int
 
@@ -87,7 +87,7 @@ def _stats_from(df: pl.DataFrame) -> tuple[int, float, float, float]:
 
 def compute_edge(
     features: Optional[dict[str, float]] = None,
-    lookback_days: int = 90,
+    lookback_days: int = 365,
     min_samples_conditional: int = 20,
 ) -> EdgeStats:
     today = date.today()
