@@ -63,3 +63,22 @@ def test_poll_fill_timeout_returns_partial_state():
     result = c.poll_fill("order-123", timeout_s=1)
     assert result["status"] == "partially_filled"
     assert result["filled_qty"] == 50
+
+
+def test_submit_short_order_uses_provided_client_order_id():
+    c = AlpacaClient.__new__(AlpacaClient)
+    c.trading_client = MagicMock()
+    c.trading_client.submit_order.return_value = MagicMock(id="x", status="new")
+    c.submit_short_order("AMC", qty=100, limit_price=10.0, client_order_id="my-key-1")
+    sent = c.trading_client.submit_order.call_args.kwargs["order_data"]
+    assert sent.client_order_id == "my-key-1"
+
+
+def test_submit_short_order_autogenerates_client_order_id():
+    c = AlpacaClient.__new__(AlpacaClient)
+    c.trading_client = MagicMock()
+    c.trading_client.submit_order.return_value = MagicMock(id="x", status="new")
+    c.submit_short_order("AMC", qty=100, limit_price=10.0)
+    sent = c.trading_client.submit_order.call_args.kwargs["order_data"]
+    assert sent.client_order_id is not None
+    assert sent.client_order_id.startswith("AMC-")
