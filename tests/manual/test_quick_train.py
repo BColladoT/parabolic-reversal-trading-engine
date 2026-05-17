@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """Quick test with CSV setups only (skips Parquet scan)."""
 import sys
+import pytest
+
+pytestmark = [pytest.mark.integration, pytest.mark.slow]
+
 sys.path.insert(0, 'src')
+
+# RL deps (gymnasium, torch) are optional extras; skip collection cleanly when absent.
+pytest.importorskip("gymnasium")
 
 from rl.data_provider_hybrid import HybridDataProvider, reset_data_provider
 import logging

@@ -10,7 +10,14 @@ D. Runtime assertions prevent out-of-bounds sampling
 
 import sys
 from pathlib import Path
+import pytest
+
+pytestmark = pytest.mark.integration
+
 sys.path.insert(0, str(Path(__file__).parent))
+
+# RL deps (gymnasium, torch) are optional extras; skip collection cleanly when absent.
+pytest.importorskip("gymnasium")
 
 from datetime import datetime
 import numpy as np

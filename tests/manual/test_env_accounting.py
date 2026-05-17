@@ -6,7 +6,14 @@ Tests the dollar-exposure based position tracking with correct financial account
 
 import sys
 import os
+import pytest
+
+pytestmark = pytest.mark.integration
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# RL deps (gymnasium, torch) are optional extras; skip collection cleanly when absent.
+pytest.importorskip("gymnasium")
 
 import numpy as np
 from src.rl.env import ParabolicReversalEnv, EnvironmentConfig
