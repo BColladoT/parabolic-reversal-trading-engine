@@ -22,6 +22,7 @@ from src.data.polars_engine import PolarsSignalEngine, TickData
 from src.screening.screener import ParabolicScreener, ScreenedAsset
 from src.risk.position_manager import RiskManager, Position
 from src.execution.signal_engine import ParabolicSignalEngine, TradeSignal, SignalType
+from src.utils.alerting import send_alert
 
 
 class TradingEngine:
@@ -59,6 +60,10 @@ class TradingEngine:
 
         # Daily reset tracking (ET trading day)
         self._last_reset_date = None
+
+        # Stale-feed alert debounce (avoid spamming Slack when feed is down)
+        self._last_stale_alert_ts = 0.0
+        self._stale_alert_min_interval = 300  # 5 minutes
         
         # Setup callbacks
         self._setup_callbacks()
@@ -122,6 +127,11 @@ class TradingEngine:
                 "Entry refused: daily loss limit tripped",
                 symbol=symbol,
                 daily_pnl=self.risk_manager.daily_pnl,
+            )
+            send_alert(
+                "Daily loss limit tripped",
+                f"Entry refused for {symbol}; daily_pnl={self.risk_manager.daily_pnl:.2f}",
+                level="critical",
             )
             return
 
@@ -285,6 +295,12 @@ class TradingEngine:
         ]
         if unknown:
             logger.critical("Startup blocked: broker has positions", symbols=unknown)
+            send_alert(
+                "Startup blocked: unreconciled broker positions",
+                f"Refusing to start. Broker holds positions not in engine state: {unknown}. "
+                f"Operator must flatten or restore state before restart.",
+                level="critical",
+            )
             raise RuntimeError(
                 f"broker has positions not in engine state: {unknown}"
             )
@@ -403,6 +419,23 @@ class TradingEngine:
     
     def _health_check(self):
         """Perform system health check."""
+        # Stale-feed watchdog (debounced so we don't spam alerts every cycle)
+        try:
+            if self.alpaca.is_feed_stale():
+                now = time.time()
+                if (now - self._last_stale_alert_ts) >= self._stale_alert_min_interval:
+                    logger.critical("WebSocket feed appears stale")
+                    send_alert(
+                        "WebSocket feed stale",
+                        "No tick messages received within freshness window. "
+                        "Reconnect will be attempted.",
+                        level="critical",
+                    )
+                    self._last_stale_alert_ts = now
+        except AttributeError:
+            # AlpacaClient predates is_feed_stale — skip silently
+            pass
+
         # Check WebSocket connection
         if not self.alpaca.is_connected():
             logger.warning("WebSocket disconnected, attempting reconnect...")
@@ -461,6 +494,12 @@ class TradingEngine:
     def emergency_shutdown(self):
         """Emergency shutdown with position closure."""
         logger.critical("EMERGENCY SHUTDOWN INITIATED")
+        send_alert(
+            "Engine emergency shutdown initiated",
+            f"TradingEngine.emergency_shutdown fired. error_count={getattr(self, 'error_count', 'n/a')}. "
+            f"Attempting to flatten all positions and stop the WebSocket.",
+            level="critical",
+        )
         
         # Try to close all positions
         try:
