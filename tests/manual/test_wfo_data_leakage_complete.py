@@ -18,6 +18,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 # RL deps (gymnasium, torch) are optional extras; skip collection cleanly when absent.
 pytest.importorskip("gymnasium")
+try:
+    import torch  # noqa: F401
+except (ImportError, OSError) as e:
+    pytest.skip(f"torch unavailable: {e}", allow_module_level=True)
 
 from datetime import datetime
 import numpy as np

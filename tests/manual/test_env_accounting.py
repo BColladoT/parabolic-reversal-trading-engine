@@ -14,6 +14,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # RL deps (gymnasium, torch) are optional extras; skip collection cleanly when absent.
 pytest.importorskip("gymnasium")
+try:
+    import torch  # noqa: F401
+except (ImportError, OSError) as e:
+    pytest.skip(f"torch unavailable: {e}", allow_module_level=True)
 
 import numpy as np
 from src.rl.env import ParabolicReversalEnv, EnvironmentConfig

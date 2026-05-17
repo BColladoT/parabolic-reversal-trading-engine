@@ -9,6 +9,10 @@ sys.path.insert(0, 'src')
 
 # RL deps (gymnasium, torch) are optional extras; skip collection cleanly when absent.
 pytest.importorskip("gymnasium")
+try:
+    import torch  # noqa: F401
+except (ImportError, OSError) as e:
+    pytest.skip(f"torch unavailable: {e}", allow_module_level=True)
 
 from rl.data_provider_hybrid import HybridDataProvider, reset_data_provider
 import logging

@@ -50,6 +50,9 @@ config/secrets.yaml
 *.log
 logs/
 
+# Runtime state (daily_pnl, daily_loss_limit_hit) — never commit
+data/state/*.json
+
 # Tooling state
 .claude/
 .tmp.driveupload/
