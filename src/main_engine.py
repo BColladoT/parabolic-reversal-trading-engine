@@ -110,12 +110,21 @@ class TradingEngine:
     def _execute_entry(self, signal: TradeSignal):
         """Execute short entry."""
         symbol = signal.symbol
-        
+
+        # Hard circuit breaker - refuse all new entries once daily loss limit hit
+        if self.risk_manager.check_daily_loss_limit():
+            logger.critical(
+                "Entry refused: daily loss limit tripped",
+                symbol=symbol,
+                daily_pnl=self.risk_manager.daily_pnl,
+            )
+            return
+
         # Check if already in position
         if symbol in self.risk_manager.positions:
             logger.info(f"Already in position for {symbol}, skipping entry")
             return
-        
+
         # Get metrics for position sizing
         metrics = self.data_engine.get_signal_data(symbol)
         
