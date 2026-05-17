@@ -113,3 +113,85 @@ def test_atr_pct_at_empty_frame_returns_zero():
                 "high": pl.Float64, "low": pl.Float64, "close": pl.Float64}
     )
     assert atr_pct_at(empty, datetime(2021, 6, 2, 10, 0), window=14) == 0.0
+
+
+# --- Task A1.3: to_journal_record ----------------------------------------
+
+def test_to_journal_record_populates_all_required_fields():
+    from src.scripts.backfill_helpers import BacktestTrade, to_journal_record
+    bars = _make_bars(datetime(2021, 6, 2, 10, 0), n=20, true_range=0.10)
+    trade = BacktestTrade(
+        entry_time=datetime(2021, 6, 2, 10, 30),
+        exit_time=datetime(2021, 6, 2, 10, 45),
+        entry_price=12.50, exit_price=11.80, shares=100,
+        pnl=70.0, exit_reason="tp1",
+        vwap_extension=0.20, volume_ratio=4.2, factors_count=3.0,
+    )
+    rec = to_journal_record(trade, "AMC", bars, initial_risk_per_share=0.50)
+    # Every field required by TRADE_RECORD_SCHEMA must be present
+    required = {
+        "symbol", "entry_time", "exit_time", "entry_price", "exit_price",
+        "shares", "side", "pnl", "r_multiple", "hold_seconds", "exit_reason",
+        "win",
+        "feat_vwap_extension", "feat_volume_ratio", "feat_atr_pct",
+        "feat_time_of_day_min", "feat_day_of_week", "feat_factors_count",
+    }
+    assert required.issubset(rec.keys())
+    assert rec["symbol"] == "AMC"
+    assert rec["side"] == "short"
+    assert rec["win"] is True
+    assert rec["r_multiple"] == pytest.approx(70.0 / (0.50 * 100))  # = 1.4
+    # entry_time = 10:30 ET -> minutes since 09:30 ET = 60
+    assert rec["feat_time_of_day_min"] == pytest.approx(60.0)
+    # 2021-06-02 was a Wednesday -> 2
+    assert rec["feat_day_of_week"] == 2.0
+    # hold_seconds = 15 minutes -> 900
+    assert rec["hold_seconds"] == 900
+
+
+def test_to_journal_record_matches_trade_journal_schema():
+    """Every key in TRADE_SCHEMA must be produced; extra keys are fine."""
+    from src.risk.trade_journal import TRADE_SCHEMA
+    from src.scripts.backfill_helpers import BacktestTrade, to_journal_record
+    bars = _make_bars(datetime(2021, 6, 2, 10, 0), n=20, true_range=0.10)
+    trade = BacktestTrade(
+        entry_time=datetime(2021, 6, 2, 10, 30),
+        exit_time=datetime(2021, 6, 2, 10, 45),
+        entry_price=12.50, exit_price=11.80, shares=100,
+        pnl=70.0, exit_reason="tp1",
+        vwap_extension=0.20, volume_ratio=4.2, factors_count=3.0,
+    )
+    rec = to_journal_record(trade, "AMC", bars, initial_risk_per_share=0.50)
+    assert set(TRADE_SCHEMA.keys()).issubset(rec.keys())
+
+
+def test_to_journal_record_loss_sets_win_false():
+    from src.scripts.backfill_helpers import BacktestTrade, to_journal_record
+    bars = _make_bars(datetime(2021, 6, 2, 10, 0), n=20, true_range=0.10)
+    trade = BacktestTrade(
+        entry_time=datetime(2021, 6, 2, 10, 30),
+        exit_time=datetime(2021, 6, 2, 10, 45),
+        entry_price=12.50, exit_price=13.20, shares=100,
+        pnl=-70.0, exit_reason="stop",
+        vwap_extension=0.20, volume_ratio=4.2, factors_count=2.0,
+    )
+    rec = to_journal_record(trade, "AMC", bars, initial_risk_per_share=0.50)
+    assert rec["win"] is False
+    assert rec["r_multiple"] == pytest.approx(-70.0 / (0.50 * 100))
+
+
+def test_to_journal_record_zero_risk_does_not_divide_by_zero():
+    """initial_risk_per_share == 0 must not raise; r_multiple stays finite."""
+    from src.scripts.backfill_helpers import BacktestTrade, to_journal_record
+    bars = _make_bars(datetime(2021, 6, 2, 10, 0), n=20, true_range=0.10)
+    trade = BacktestTrade(
+        entry_time=datetime(2021, 6, 2, 10, 30),
+        exit_time=datetime(2021, 6, 2, 10, 45),
+        entry_price=12.50, exit_price=11.80, shares=100,
+        pnl=70.0, exit_reason="tp1",
+        vwap_extension=0.20, volume_ratio=4.2, factors_count=3.0,
+    )
+    rec = to_journal_record(trade, "AMC", bars, initial_risk_per_share=0.0)
+    # No ZeroDivisionError; just an unbounded-but-finite multiple
+    assert isinstance(rec["r_multiple"], float)
+    assert rec["r_multiple"] == rec["r_multiple"]  # not NaN

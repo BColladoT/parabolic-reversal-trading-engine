@@ -159,3 +159,51 @@ def atr_pct_at(bars: pl.DataFrame, ts: datetime, window: int = 14) -> float:
     if close_at <= 0:
         return 0.0
     return float(tr) / close_at
+
+
+def to_journal_record(
+    trade: BacktestTrade,
+    symbol: str,
+    bars: pl.DataFrame,
+    initial_risk_per_share: float,
+) -> dict:
+    """Materialize a :class:`BacktestTrade` into a journal-schema dict.
+
+    Computes ``feat_atr_pct`` from ``bars``, ``feat_time_of_day_min`` and
+    ``feat_day_of_week`` from ``trade.entry_time``, ``r_multiple`` from
+    ``pnl / (initial_risk_per_share * shares)``, ``hold_seconds`` from the
+    entry/exit time delta and ``win`` from the sign of pnl.
+
+    A floor of ``1e-6`` is applied to the denominator of ``r_multiple`` so
+    that a zero / unknown stop distance does not raise — the resulting
+    multiple is large but finite.
+    """
+    pnl = float(trade.pnl)
+    initial_risk = max(float(initial_risk_per_share) * trade.shares, 1e-6)
+    r_multiple = pnl / initial_risk
+    hold_seconds = int((trade.exit_time - trade.entry_time).total_seconds())
+    et = trade.entry_time
+    # Regular trading hours open is 09:30 ET; assume `entry_time` is already
+    # in ET (the engine yields tz-naive ET timestamps). 09:30 -> 0 minutes.
+    time_of_day_min = float((et.hour - 9) * 60 + (et.minute - 30))
+    day_of_week = float(et.weekday())
+    return {
+        "symbol": symbol,
+        "entry_time": trade.entry_time,
+        "exit_time": trade.exit_time,
+        "entry_price": float(trade.entry_price),
+        "exit_price": float(trade.exit_price),
+        "shares": int(trade.shares),
+        "side": "short",
+        "pnl": pnl,
+        "r_multiple": r_multiple,
+        "hold_seconds": hold_seconds,
+        "exit_reason": str(trade.exit_reason),
+        "win": pnl > 0,
+        "feat_vwap_extension": float(trade.vwap_extension),
+        "feat_volume_ratio": float(trade.volume_ratio),
+        "feat_atr_pct": atr_pct_at(bars, trade.entry_time),
+        "feat_time_of_day_min": time_of_day_min,
+        "feat_day_of_week": day_of_week,
+        "feat_factors_count": float(trade.factors_count),
+    }
