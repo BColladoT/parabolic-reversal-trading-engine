@@ -16,7 +16,9 @@ from src.risk.trade_journal import read_trades
 
 
 def _print_overall() -> None:
-    e = compute_edge()
+    # Pass lookback_days=None so historical backfill data (often >1yr old)
+    # is included in the displayed stats. Live sizing uses a tighter default.
+    e = compute_edge(lookback_days=None)
     print("=== Overall edge ===")
     print(f"n_trades         : {e.n_trades}")
     if e.n_trades == 0:
