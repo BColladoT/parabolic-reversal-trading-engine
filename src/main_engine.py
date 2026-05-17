@@ -149,7 +149,7 @@ class TradingEngine:
             entry_price=signal.price,
             atr=signal.atr,
             vwap=signal.vwap,
-            parabolic_apex=self.screener.screened_assets.get(symbol, ScreenedAsset(
+            day_high=self.screener.screened_assets.get(symbol, ScreenedAsset(
                 symbol=symbol, current_price=signal.price, day_high=signal.price * 1.1,
                 day_low=signal.price * 0.9, day_open=signal.price * 0.5,
                 day_volume=1000000, percent_gain=100, percent_from_high=5,
@@ -180,10 +180,9 @@ class TradingEngine:
                 entry_price=signal.price,
                 qty=sizing['shares'],
                 stop_loss=sizing['stop_loss'],
-                profit_target=sizing['profit_target'],
                 vwap=signal.vwap,
-                parabolic_apex=sizing['stop_loss'],  # Use stop as apex proxy
-                entry_features=getattr(signal, "features", None),  # tolerate older signals without this field
+                day_high=sizing['stop_loss'],
+                entry_features=getattr(signal, "features", None),
             )
             
             logger.info(
