@@ -48,7 +48,7 @@ rl = [
     "tqdm>=4.65.0",
     "tensorboard>=2.15.0",
 ]
-test = ["pytest>=8.0.0"]
+test = ["pytest>=8.0.0", "pytest-cov>=4.0"]
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
@@ -62,7 +62,7 @@ minversion = "8.0"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-addopts = ["-ra", "--strict-markers", "--ignore=tests/manual"]
+addopts = ["-ra", "--strict-markers"]
 markers = [
     "slow: tests that take more than a few seconds",
     "integration: tests that require external services (Alpaca, RLlib)",
