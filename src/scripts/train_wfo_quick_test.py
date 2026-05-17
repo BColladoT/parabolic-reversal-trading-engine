@@ -10,6 +10,7 @@ This script runs a shortened WFO training to verify:
 Recommended: Run this first before the full training.
 """
 
+import torch  # MUST be imported before ray on Windows — ray's C extensions otherwise poison the DLL search path and torch's c10.dll fails to load
 import ray
 from ray.rllib.algorithms.sac import SACConfig
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
@@ -21,7 +22,6 @@ import numpy as np
 import json
 import csv
 import logging
-import torch
 import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -179,7 +179,6 @@ class QuickWFOTrainer:
                     "trades_log_path": str(Path(self.config.output_dir).resolve() / "trades.jsonl"),
                     "dashboard_fold": fold,
                 },
-                disable_env_checking=True,
             )
             .framework("torch")
             .training(
