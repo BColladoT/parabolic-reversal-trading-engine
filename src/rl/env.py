@@ -68,6 +68,41 @@ def r_multiple_reward_term(
     return float(weight) * clamped
 
 
+def scale_out_cover_target(
+    current_position_value: float,
+    desired_exposure_fraction: float,
+) -> float:
+    """Compute target position value for a scale-out COVER action.
+
+    The agent's continuous action above the +0.05 cover threshold linearly
+    maps to the fraction of the current position to close:
+        action = +0.06 -> close 6% of position (almost a no-op)
+        action = +0.50 -> close 50%
+        action = +1.00 -> close 100% (full exit)
+
+    Replaces the prior binary "any cover action fully closes the position"
+    semantics. See docs/sweep_diagnosis_2026-05-18.md for the diagnostic
+    that motivated this fix (median 2-bar holds driven by policy-noise +
+    all-or-nothing cover).
+
+    Pure-Python and torch-free so it can be unit-tested via AST extraction
+    without requiring the full RL stack (gymnasium/torch/ray).
+
+    Args:
+        current_position_value: Current dollar value of position. Negative
+            for short, 0 if flat. Positive is not expected (no longs).
+        desired_exposure_fraction: Agent's continuous action component.
+            For COVER actions this is expected to be in (0.05, 1.0] —
+            anything outside is clamped to [0.0, 1.0].
+
+    Returns:
+        Target position value (in dollars). For a short, the result is
+        less-negative or zero. For a flat or long position, returns 0.0.
+    """
+    cover_fraction = min(1.0, max(0.0, desired_exposure_fraction))
+    return current_position_value * (1.0 - cover_fraction)
+
+
 @dataclass
 class TradeRecord:
     """Record of a completed trade."""
@@ -726,8 +761,14 @@ class ParabolicReversalEnv(gym.Env):
         if action_type == 2:  # HOLD
             # Preserve current position - no transaction costs for true hold
             target_position_value = self.current_position_value
-        else:
-            # Apply Quarter-Kelly position sizing for non-HOLD actions
+        elif action_type == 1:  # COVER (scale-out)
+            # Scale-out semantics: action magnitude controls the FRACTION of the
+            # position to close. Replaces the prior all-or-nothing cover (which
+            # produced 2-bar median holds because any Gaussian-noise sample > +0.05
+            # fully closed the position). See docs/sweep_diagnosis_2026-05-18.md.
+            target_position_value = self._compute_cover_target(desired_exposure_fraction)
+        else:  # action_type == 0 — ENTRY (increase short exposure)
+            # Apply Quarter-Kelly position sizing for ENTRY actions.
             max_leverage = self._calculate_kelly_constrained_leverage()
             target_exposure = desired_exposure_fraction * max_leverage
             
@@ -1141,7 +1182,16 @@ class ParabolicReversalEnv(gym.Env):
             return 1  # Action 1: DECREASE short exposure (Cover)
         else:
             return 2  # Action 2: Hold
-    
+
+    def _compute_cover_target(self, desired_exposure_fraction: float) -> float:
+        """Class-method wrapper around scale_out_cover_target.
+
+        Routes the agent's COVER action (continuous, > +0.05) to the
+        scale-out target-value computation. See ``scale_out_cover_target``
+        at module scope for the math + docstring.
+        """
+        return scale_out_cover_target(self.current_position_value, desired_exposure_fraction)
+
     def _compute_action_mask(self) -> np.ndarray:
         """Compute the boolean action mask."""
         mask = np.ones(3, dtype=np.int8)
