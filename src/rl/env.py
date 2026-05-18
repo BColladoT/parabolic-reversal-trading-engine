@@ -103,6 +103,49 @@ def scale_out_cover_target(
     return current_position_value * (1.0 - cover_fraction)
 
 
+def mfe_evaporation_penalty(
+    unrealized_pnl: float,
+    mfe_peak: float,
+    max_penalty: float,
+) -> float:
+    """Per-step penalty for letting a profitable position drift back from its MFE peak.
+
+    Fires only when the trade has been profitable at some point (``mfe_peak > 0``)
+    AND the current unrealized PnL has fallen below the peak. The penalty is
+    proportional to the fraction of the peak that has evaporated:
+
+        penalty = -max_penalty * clip((mfe_peak - unrealized_pnl) / mfe_peak, 0, 1)
+
+    - 0 at peak (no evaporation)
+    - -max_penalty/2 at half evaporation
+    - -max_penalty when current PnL is at zero or below (full evaporation)
+
+    With ``max_penalty=0.0`` (the default), this is a strict no-op so the
+    pre-existing reward path is mathematically unchanged for callers that
+    don't opt in.
+
+    Pure-Python and torch-free so it can be unit-tested via AST extraction
+    without requiring the full RL stack. Mirrors the pattern of
+    ``r_multiple_reward_term`` and ``scale_out_cover_target``.
+
+    Args:
+        unrealized_pnl: Current unrealized PnL of the open position (dollars).
+        mfe_peak: Max favorable excursion observed so far this trade (dollars).
+        max_penalty: Magnitude cap on the penalty (positive number; default 0.0 disables).
+
+    Returns:
+        Penalty contribution to reward (zero or negative).
+    """
+    if max_penalty <= 0.0:
+        return 0.0
+    if mfe_peak <= 0.0:
+        return 0.0
+    if unrealized_pnl >= mfe_peak:
+        return 0.0
+    evaporation_fraction = min(1.0, max(0.0, (mfe_peak - unrealized_pnl) / mfe_peak))
+    return -float(max_penalty) * evaporation_fraction
+
+
 @dataclass
 class TradeRecord:
     """Record of a completed trade."""
@@ -172,6 +215,12 @@ class EnvironmentConfig:
     # Default weight 0.0 → mathematically identical to pre-A4 reward.
     r_multiple_reward_weight: float = 0.0
     r_multiple_reward_clip: float = 5.0
+
+    # MFE-evaporation penalty: per-step signal pushing the agent to take profit
+    # at peak rather than letting winners drift back through entry. Default 0.0
+    # = disabled (backward-compatible). See docs/scale_out_cover_smoke_2026-05-18.md
+    # for the diagnostic that motivated this.
+    mfe_evaporation_penalty_max: float = 0.0
 
     # Action space
     action_space_low: float = -1.0
@@ -939,6 +988,7 @@ class ParabolicReversalEnv(gym.Env):
         waiting_quality = self._compute_waiting_quality()
         entry_bonus = self._compute_entry_bonus()
         hold_discipline = self._compute_hold_discipline()
+        mfe_evap_penalty = self._compute_mfe_evaporation_penalty()
 
         completion_bonus = 0.0
         r_multiple_term = 0.0  # A4: per-trade R-multiple reward (default weight 0 = no-op)
@@ -965,7 +1015,8 @@ class ParabolicReversalEnv(gym.Env):
             self.max_adverse_excursion = 0.0
 
         shaping_total = (opportunity_cost + participation + waiting_quality
-                         + entry_bonus + hold_discipline + completion_bonus)
+                         + entry_bonus + hold_discipline + mfe_evap_penalty
+                         + completion_bonus)
 
         # Hard-cap shaping at 3x base reward magnitude to prevent shaping dominance.
         # When base is near-zero (flat, no equity change), allow small absolute shaping.
@@ -1127,6 +1178,24 @@ class ParabolicReversalEnv(gym.Env):
             return 0.0
         profit_pct = self.unrealized_pnl / max(self.initial_capital, 1.0)
         return 0.1 + min(0.4, profit_pct * 20.0)  # [0.1, 0.5]
+
+    def _compute_mfe_evaporation_penalty(self) -> float:
+        """Class-method wrapper around the pure mfe_evaporation_penalty helper.
+
+        Reads ``self.unrealized_pnl``, ``self.max_favorable_excursion`` (the
+        per-trade MFE tracker already maintained at env.py around line 926),
+        and the config field ``mfe_evaporation_penalty_max``.
+
+        Returns 0.0 when there's no open position so the penalty can't be
+        farmed by repeatedly entering and immediately re-evaporating noise.
+        """
+        if self.current_position >= 0:
+            return 0.0
+        return mfe_evaporation_penalty(
+            unrealized_pnl=self.unrealized_pnl,
+            mfe_peak=self.max_favorable_excursion,
+            max_penalty=self.config.mfe_evaporation_penalty_max,
+        )
 
     def _compute_trade_completion_bonus(
         self,

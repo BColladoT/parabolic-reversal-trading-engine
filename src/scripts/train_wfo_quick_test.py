@@ -176,6 +176,7 @@ class QuickWFOTrainer:
                     "transaction_cost_per_dollar": getattr(self.config, '_txn_cost', 0.003),
                     "r_multiple_reward_weight": getattr(self.config, '_r_multiple_reward_weight', 0.0),
                     "r_multiple_reward_clip": getattr(self.config, '_r_multiple_reward_clip', 5.0),
+                    "mfe_evaporation_penalty_max": getattr(self.config, '_mfe_evap_penalty', 0.0),
                     "trades_log_path": str(Path(self.config.output_dir).resolve() / "trades.jsonl"),
                     "dashboard_fold": fold,
                 },
@@ -937,6 +938,11 @@ def main():
         "--r-multiple-reward-clip", type=float, default=5.0,
         help="Per-trade R-multiple clip magnitude before scaling.",
     )
+    parser.add_argument(
+        '--mfe-evap-penalty', type=float, default=0.0,
+        help='MFE-evaporation per-step penalty max magnitude (0.0 disables; '
+             'try 0.5 to roughly cancel hold_discipline at full evaporation).',
+    )
     parser.add_argument('--eval-episodes', type=int, default=50,
                         help='Number of evaluation episodes (default: 50)')
 
@@ -983,6 +989,7 @@ def main():
     config._txn_cost = args.txn_cost
     config._r_multiple_reward_weight = args.r_multiple_reward_weight
     config._r_multiple_reward_clip = args.r_multiple_reward_clip
+    config._mfe_evap_penalty = args.mfe_evap_penalty
 
     trainer = QuickWFOTrainer(config)
     results = trainer.run()
