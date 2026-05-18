@@ -898,6 +898,8 @@ def main():
 
     parser = argparse.ArgumentParser(description='Quick WFO Test (1-2 hours)')
     parser.add_argument('--output-dir', type=str, default='models/wfo_test')
+    parser.add_argument('--seed', type=int, default=42,
+                        help='Random seed (torch + cuda + numpy + stdlib random) for reproducibility.')
     # Joint training params
     parser.add_argument('--total-steps', type=int, default=25000)
     parser.add_argument('--actor-warmup-steps', type=int, default=2000)
@@ -939,6 +941,14 @@ def main():
                         help='Number of evaluation episodes (default: 50)')
 
     args = parser.parse_args()
+
+    # Reproducibility: seed every RNG that matters.
+    import random as _stdlib_random
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+    np.random.seed(args.seed)
+    _stdlib_random.seed(args.seed)
 
     # Backwards compat: map old warmup+finetune to total
     if args.warmup_steps is not None and args.finetune_steps is not None:
