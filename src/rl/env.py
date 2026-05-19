@@ -231,6 +231,15 @@ class EnvironmentConfig:
     # mean is in the HOLD region.
     hold_band_threshold: float = 0.05
 
+    # Asymmetric overrides for ENTRY and COVER thresholds. When None, falls
+    # back to hold_band_threshold above. When set, allows different widths
+    # for entry (typically narrow, so entries fire easily) vs cover (typically
+    # wide, so noise doesn't trigger covers). Diagnosis in
+    # docs/wider_hold_band_smoke_2026-05-19.md showed PR #13's symmetric wider
+    # band also suppressed entries — trade count dropped 8.8x vs baseline.
+    entry_threshold: Optional[float] = None
+    cover_threshold: Optional[float] = None
+
     # Action space
     action_space_low: float = -1.0
     action_space_high: float = 1.0
@@ -1237,17 +1246,17 @@ class ParabolicReversalEnv(gym.Env):
 
         CANONICAL ACTION CONVENTION (must match agent.py):
             action in [-1, 1]
-            action < -T: INCREASE short exposure (Entry/Add)
-            action > +T: DECREASE short exposure (Cover)
-            else:        HOLD current exposure  [-T, +T]
+            action < -E: INCREASE short exposure (Entry/Add)
+            action > +C: DECREASE short exposure (Cover)
+            else:        HOLD current exposure  [-E, +C]
 
-        T = ``self.config.hold_band_threshold`` (default 0.05).
+        E = self.config.entry_threshold (default None -> fall back to hold_band_threshold).
+        C = self.config.cover_threshold (default None -> fall back to hold_band_threshold).
 
-        Wider T suppresses noise-driven micro-covers. With scale-out cover
-        (PR #11) and the default narrow band, SAC Gaussian noise above +0.05
-        triggers tiny partial covers each step, decaying positions to zero
-        over long holds. Widening to e.g. 0.3 keeps positions intact when
-        the policy's mean is in the HOLD region.
+        Symmetric thresholds (E == C) match PR #13 behavior. Asymmetric
+        thresholds (E < C) preserve PR #13's noise-suppression on cover
+        while keeping entries easy. See
+        docs/asymmetric_thresholds_smoke_2026-05-19.md.
 
         Action mask indices:
             mask[0]: increase short allowed
@@ -1255,14 +1264,19 @@ class ParabolicReversalEnv(gym.Env):
             mask[2]: hold allowed
 
         Returns:
-            0: INCREASE short exposure (Entry) - exposure_fraction < -T
-            1: DECREASE short exposure (Cover) - exposure_fraction > +T
-            2: Hold (-T <= exposure_fraction <= +T)
+            0: INCREASE short exposure (Entry) - exposure_fraction < -E
+            1: DECREASE short exposure (Cover) - exposure_fraction > +C
+            2: Hold (-E <= exposure_fraction <= +C)
         """
-        threshold = float(self.config.hold_band_threshold)
-        if exposure_fraction < -threshold:
+        entry_t = self.config.entry_threshold
+        if entry_t is None:
+            entry_t = self.config.hold_band_threshold
+        cover_t = self.config.cover_threshold
+        if cover_t is None:
+            cover_t = self.config.hold_band_threshold
+        if exposure_fraction < -float(entry_t):
             return 0  # Action 0: INCREASE short exposure (Entry)
-        elif exposure_fraction > threshold:
+        elif exposure_fraction > float(cover_t):
             return 1  # Action 1: DECREASE short exposure (Cover)
         else:
             return 2  # Action 2: Hold
