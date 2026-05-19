@@ -13,6 +13,7 @@ Recommended: Run this first before the full training.
 import torch  # MUST be imported before ray on Windows — ray's C extensions otherwise poison the DLL search path and torch's c10.dll fails to load
 import ray
 from ray.rllib.algorithms.sac import SACConfig
+from ray.rllib.algorithms.ppo import PPOConfig
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from typing import Dict, Optional, Any
 from dataclasses import dataclass
@@ -131,7 +132,15 @@ class QuickWFOTrainer:
         logger.info("QuickWFOTrainer initialized")
     
     def create_sac_config(self, fold: int) -> SACConfig:
-        """Create SAC configuration with joint actor-critic training."""
+        """Create SAC configuration with joint actor-critic training.
+
+        Only invoked when self.config._algo == 'sac' (the default). The
+        JointTrainingCallback wired in below is SAC-specific (it accesses
+        the actor optimizer via optimizer_names() to freeze/unfreeze it during
+        warmup) and is intentionally not used for PPO — see create_ppo_config.
+        """
+        algo = getattr(self.config, '_algo', 'sac')
+        assert algo == 'sac', f"create_sac_config invoked with algo={algo!r}"
 
         total_timesteps = self.config.total_timesteps
         lr_actor = getattr(self.config, '_lr_actor', 3e-4)
@@ -200,6 +209,9 @@ class QuickWFOTrainer:
                 train_batch_size=self.config.batch_size,
                 grad_clip=1.0,
             )
+            # SAC-only: JointTrainingCallback freezes/unfreezes the actor optimizer
+            # via algorithm.optimizer_names(). PPO has a single optimizer and uses
+            # entropy_coeff for exploration — see create_ppo_config (algo == 'ppo').
             .callbacks(callbacks_class=lambda: JointTrainingCallback(callback_config))
             .rollouts(
                 num_rollout_workers=0,
@@ -221,7 +233,75 @@ class QuickWFOTrainer:
                 logger.warning(f"Could not wire MaskedSACRLModule: {exc}")
 
         return sac_config
-    
+
+    def create_ppo_config(self, fold: int) -> PPOConfig:
+        """Create PPO configuration — drop-in alternative to SAC.
+
+        PPO is on-policy with a clipped surrogate objective; its policy update
+        is bounded per step and its rollout-time noise comes from the policy's
+        own stochastic head rather than a separate SAC exploration term. This
+        is the apples-to-apples algorithm swap that holds the action space
+        constant (Box(-1, 1)) and lets us compare PPO vs SAC directly.
+
+        Uses RLlib's well-tested PPO defaults (clip_param=0.3, num_sgd_iter=20,
+        sgd_minibatch_size=128, entropy_coeff=0.01, lr=3e-4). No BC warm-start
+        (MaskedGaussianPolicy actor architecture is not loadable by PPO) and
+        no SAC-specific callbacks (PPO uses a single optimizer; SAC's
+        JointTrainingCallback freezes/unfreezes the actor optimizer).
+        """
+        total_timesteps = self.config.total_timesteps
+
+        ppo_config = (
+            PPOConfig()
+            .environment(
+                env=ParabolicReversalEnv,
+                env_config={
+                    "initial_capital": getattr(self.config, '_initial_capital', 100000.0),
+                    "annealer_total_timesteps": total_timesteps,
+                    "max_drawdown": getattr(self.config, '_max_drawdown', -10000.0),
+                    "circuit_breaker_threshold": getattr(self.config, '_max_drawdown', -10000.0),
+                    "intra_step_stop_loss": getattr(self.config, '_stop_loss', -2000.0),
+                    "max_position_capital_fraction": getattr(self.config, '_max_pos_fraction', 0.30),
+                    "min_vwap_deviation_entry": getattr(self.config, '_vwap_threshold', 20.0),
+                    "transaction_cost_per_dollar": getattr(self.config, '_txn_cost', 0.003),
+                    "r_multiple_reward_weight": getattr(self.config, '_r_multiple_reward_weight', 0.0),
+                    "r_multiple_reward_clip": getattr(self.config, '_r_multiple_reward_clip', 5.0),
+                    "mfe_evaporation_penalty_max": getattr(self.config, '_mfe_evap_penalty', 0.0),
+                    "hold_band_threshold": getattr(self.config, '_hold_band_threshold', 0.05),
+                    "entry_threshold": getattr(self.config, '_entry_threshold', None),
+                    "cover_threshold": getattr(self.config, '_cover_threshold', None),
+                    "trades_log_path": str(Path(self.config.output_dir).resolve() / "trades.jsonl"),
+                    "dashboard_fold": fold,
+                },
+            )
+            .framework("torch")
+            .training(
+                gamma=self.config.gamma,
+                lr=getattr(self.config, '_lr_actor', 3e-4),
+                train_batch_size=4000,
+                sgd_minibatch_size=128,
+                num_sgd_iter=20,
+                clip_param=0.3,
+                entropy_coeff=0.01,
+                vf_clip_param=10.0,
+                grad_clip=1.0,
+                model={"fcnet_hiddens": [256, 256], "fcnet_activation": "relu"},
+            )
+            .rollouts(
+                num_rollout_workers=0,
+                rollout_fragment_length=200,
+            )
+            .reporting(
+                min_time_s_per_iteration=5,
+            )
+            .evaluation(
+                evaluation_interval=None,  # manual eval loop (same path as SAC)
+            )
+            .resources(num_gpus=1 if torch.cuda.is_available() else 0)
+        )
+
+        return ppo_config
+
     def train_fold(
         self,
         fold: int,
@@ -237,8 +317,14 @@ class QuickWFOTrainer:
         logger.info(f"{'='*70}")
         logger.info(f"Train: {train_start.date()} → {train_end.date()}")
         logger.info(f"Test:  {test_start.date()} → {test_end.date()}")
-        
-        config = self.create_sac_config(fold)
+
+        algo_choice = getattr(self.config, '_algo', 'sac')
+        if algo_choice == 'ppo':
+            logger.info("Algorithm: PPO (on-policy, single optimizer, no BC warm-start)")
+            config = self.create_ppo_config(fold)
+        else:
+            logger.info("Algorithm: SAC (off-policy, masked Gaussian, joint training callback)")
+            config = self.create_sac_config(fold)
         algo = config.build()
         
         total_timesteps = self.config.total_timesteps
@@ -368,6 +454,27 @@ class QuickWFOTrainer:
             "dashboard_fold": fold,
         }
 
+        # PPO uses RLlib's default FullyConnectedNetwork, which expects a flat
+        # obs tensor (`input_dict["obs_flat"]`). For Dict observation spaces the
+        # rollout pipeline auto-flattens via a preprocessor — but the manual
+        # compute_single_action path bypasses that. Apply the preprocessor here
+        # so PPO eval works identically to its training-time obs path. SAC's
+        # masked model accepts Dict obs natively, so this is a no-op for SAC.
+        algo_choice = getattr(self.config, '_algo', 'sac')
+        preprocessor = None
+        if algo_choice == 'ppo':
+            try:
+                from ray.rllib.models.preprocessors import get_preprocessor
+                # Use a dummy env's observation space (matches what was passed
+                # to PPOConfig.environment(...) at construction time).
+                _tmp_env = ParabolicReversalEnv(config=eval_env_config)
+                preprocessor_cls = get_preprocessor(_tmp_env.observation_space)
+                preprocessor = preprocessor_cls(_tmp_env.observation_space)
+                _tmp_env.close() if hasattr(_tmp_env, 'close') else None
+            except Exception as exc:
+                logger.warning(f"Could not build PPO obs preprocessor: {exc}")
+                preprocessor = None
+
         episode_results = []
         for ep_idx, setup in enumerate(test_setups):
             try:
@@ -380,8 +487,14 @@ class QuickWFOTrainer:
 
                 done, truncated, step_count = False, False, 0
                 while not (done or truncated) and step_count < 500:
-                    obs_dict = obs if isinstance(obs, dict) else {'state': obs}
-                    action, _, _ = policy.compute_single_action(obs_dict, explore=False)
+                    if preprocessor is not None:
+                        # PPO path: flatten Dict obs to a single tensor matching
+                        # the network's expected input layout.
+                        policy_input = preprocessor.transform(obs)
+                    else:
+                        # SAC path: pass Dict obs directly (custom masked model).
+                        policy_input = obs if isinstance(obs, dict) else {'state': obs}
+                    action, _, _ = policy.compute_single_action(policy_input, explore=False)
                     obs, reward, done, truncated, info = eval_env.step(action)
                     step_count += 1
 
@@ -965,6 +1078,14 @@ def main():
     )
     parser.add_argument('--eval-episodes', type=int, default=50,
                         help='Number of evaluation episodes (default: 50)')
+    parser.add_argument(
+        '--algo', type=str, default='sac', choices=['sac', 'ppo'],
+        help='RL algorithm: sac (default, off-policy + masked Gaussian + '
+             'JointTrainingCallback) or ppo (on-policy, no BC warm-start, '
+             'no actor-freeze callbacks). PPO is an apples-to-apples algorithm '
+             'swap holding the action space constant — see '
+             'docs/rl_investigation_synthesis_2026-05-19.md.',
+    )
 
     args = parser.parse_args()
 
@@ -1013,6 +1134,7 @@ def main():
     config._hold_band_threshold = args.hold_band_threshold
     config._entry_threshold = args.entry_threshold
     config._cover_threshold = args.cover_threshold
+    config._algo = args.algo
 
     trainer = QuickWFOTrainer(config)
     results = trainer.run()
