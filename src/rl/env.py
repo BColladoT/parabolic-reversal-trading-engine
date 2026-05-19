@@ -222,6 +222,15 @@ class EnvironmentConfig:
     # for the diagnostic that motivated this.
     mfe_evaporation_penalty_max: float = 0.0
 
+    # HOLD-band threshold: width of the [-T, +T] band around 0 that maps to HOLD
+    # (action_type=2). Default 0.05 = pre-existing behavior. Wider thresholds
+    # suppress noise-driven micro-covers from SAC's Gaussian policy. Diagnosis
+    # in docs/mfe_evap_smoke_2026-05-18.md (position-size analysis) shows that
+    # accumulated policy noise above +0.05 trims scale-out positions to zero
+    # over long holds; a wider band keeps positions intact when the policy
+    # mean is in the HOLD region.
+    hold_band_threshold: float = 0.05
+
     # Action space
     action_space_low: float = -1.0
     action_space_high: float = 1.0
@@ -1228,12 +1237,17 @@ class ParabolicReversalEnv(gym.Env):
 
         CANONICAL ACTION CONVENTION (must match agent.py):
             action in [-1, 1]
-            action < -0.05: INCREASE short exposure (Entry/Add)
-            action > 0.05:  DECREASE short exposure (Cover)
-            else:           HOLD current exposure  [-0.05, 0.05]
+            action < -T: INCREASE short exposure (Entry/Add)
+            action > +T: DECREASE short exposure (Cover)
+            else:        HOLD current exposure  [-T, +T]
 
-        Asymmetric thresholds (§2 Option C): center of a zero-mean Gaussian
-        maps to COVER territory, breaking the HOLD attractor.
+        T = ``self.config.hold_band_threshold`` (default 0.05).
+
+        Wider T suppresses noise-driven micro-covers. With scale-out cover
+        (PR #11) and the default narrow band, SAC Gaussian noise above +0.05
+        triggers tiny partial covers each step, decaying positions to zero
+        over long holds. Widening to e.g. 0.3 keeps positions intact when
+        the policy's mean is in the HOLD region.
 
         Action mask indices:
             mask[0]: increase short allowed
@@ -1241,13 +1255,14 @@ class ParabolicReversalEnv(gym.Env):
             mask[2]: hold allowed
 
         Returns:
-            0: INCREASE short exposure (Entry) - exposure_fraction < -0.05
-            1: DECREASE short exposure (Cover) - exposure_fraction > 0.05
-            2: Hold (-0.05 <= exposure_fraction <= 0.05)
+            0: INCREASE short exposure (Entry) - exposure_fraction < -T
+            1: DECREASE short exposure (Cover) - exposure_fraction > +T
+            2: Hold (-T <= exposure_fraction <= +T)
         """
-        if exposure_fraction < -0.05:
+        threshold = float(self.config.hold_band_threshold)
+        if exposure_fraction < -threshold:
             return 0  # Action 0: INCREASE short exposure (Entry)
-        elif exposure_fraction > 0.05:
+        elif exposure_fraction > threshold:
             return 1  # Action 1: DECREASE short exposure (Cover)
         else:
             return 2  # Action 2: Hold
