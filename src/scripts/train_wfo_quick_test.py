@@ -178,6 +178,8 @@ class QuickWFOTrainer:
                     "r_multiple_reward_clip": getattr(self.config, '_r_multiple_reward_clip', 5.0),
                     "mfe_evaporation_penalty_max": getattr(self.config, '_mfe_evap_penalty', 0.0),
                     "hold_band_threshold": getattr(self.config, '_hold_band_threshold', 0.05),
+                    "entry_threshold": getattr(self.config, '_entry_threshold', None),
+                    "cover_threshold": getattr(self.config, '_cover_threshold', None),
                     "trades_log_path": str(Path(self.config.output_dir).resolve() / "trades.jsonl"),
                     "dashboard_fold": fold,
                 },
@@ -950,6 +952,17 @@ def main():
              '(pre-existing). Wider (e.g. 0.3) suppresses noise-driven '
              'micro-covers from the Gaussian policy.',
     )
+    parser.add_argument(
+        '--entry-threshold', type=float, default=None,
+        help='ENTRY threshold override. Default None = falls back to '
+             '--hold-band-threshold. Use 0.05 with --cover-threshold 0.3 '
+             'for asymmetric thresholds (narrow entry, wide cover).',
+    )
+    parser.add_argument(
+        '--cover-threshold', type=float, default=None,
+        help='COVER threshold override. Default None = falls back to '
+             '--hold-band-threshold. See --entry-threshold.',
+    )
     parser.add_argument('--eval-episodes', type=int, default=50,
                         help='Number of evaluation episodes (default: 50)')
 
@@ -998,6 +1011,8 @@ def main():
     config._r_multiple_reward_clip = args.r_multiple_reward_clip
     config._mfe_evap_penalty = args.mfe_evap_penalty
     config._hold_band_threshold = args.hold_band_threshold
+    config._entry_threshold = args.entry_threshold
+    config._cover_threshold = args.cover_threshold
 
     trainer = QuickWFOTrainer(config)
     results = trainer.run()
