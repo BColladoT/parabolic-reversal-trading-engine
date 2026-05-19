@@ -454,6 +454,27 @@ class QuickWFOTrainer:
             "dashboard_fold": fold,
         }
 
+        # PPO uses RLlib's default FullyConnectedNetwork, which expects a flat
+        # obs tensor (`input_dict["obs_flat"]`). For Dict observation spaces the
+        # rollout pipeline auto-flattens via a preprocessor — but the manual
+        # compute_single_action path bypasses that. Apply the preprocessor here
+        # so PPO eval works identically to its training-time obs path. SAC's
+        # masked model accepts Dict obs natively, so this is a no-op for SAC.
+        algo_choice = getattr(self.config, '_algo', 'sac')
+        preprocessor = None
+        if algo_choice == 'ppo':
+            try:
+                from ray.rllib.models.preprocessors import get_preprocessor
+                # Use a dummy env's observation space (matches what was passed
+                # to PPOConfig.environment(...) at construction time).
+                _tmp_env = ParabolicReversalEnv(config=eval_env_config)
+                preprocessor_cls = get_preprocessor(_tmp_env.observation_space)
+                preprocessor = preprocessor_cls(_tmp_env.observation_space)
+                _tmp_env.close() if hasattr(_tmp_env, 'close') else None
+            except Exception as exc:
+                logger.warning(f"Could not build PPO obs preprocessor: {exc}")
+                preprocessor = None
+
         episode_results = []
         for ep_idx, setup in enumerate(test_setups):
             try:
@@ -466,8 +487,14 @@ class QuickWFOTrainer:
 
                 done, truncated, step_count = False, False, 0
                 while not (done or truncated) and step_count < 500:
-                    obs_dict = obs if isinstance(obs, dict) else {'state': obs}
-                    action, _, _ = policy.compute_single_action(obs_dict, explore=False)
+                    if preprocessor is not None:
+                        # PPO path: flatten Dict obs to a single tensor matching
+                        # the network's expected input layout.
+                        policy_input = preprocessor.transform(obs)
+                    else:
+                        # SAC path: pass Dict obs directly (custom masked model).
+                        policy_input = obs if isinstance(obs, dict) else {'state': obs}
+                    action, _, _ = policy.compute_single_action(policy_input, explore=False)
                     obs, reward, done, truncated, info = eval_env.step(action)
                     step_count += 1
 
