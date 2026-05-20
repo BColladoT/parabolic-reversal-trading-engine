@@ -482,6 +482,15 @@ class QuickWFOTrainer:
                 logger.warning(f"Could not build PPO obs preprocessor: {exc}")
                 preprocessor = None
 
+        # Phase 1.2: collect OOS action distribution + time-in-position
+        # diagnostics from get_episode_info() (added in Phase 1.1, env.py).
+        # The histogram is only populated for discrete action spaces; for
+        # continuous it's all zeros (the int-cast of a Box(-1,1) sample isn't
+        # a meaningful bin index). We still collect it uniformly here and
+        # gate the action_distribution computation on action_space_type
+        # below to avoid emitting a meaningless distribution for continuous.
+        action_space_type = getattr(self.config, '_action_space_type', 'continuous')
+
         episode_results = []
         for ep_idx, setup in enumerate(test_setups):
             try:
@@ -505,11 +514,15 @@ class QuickWFOTrainer:
                     obs, reward, done, truncated, info = eval_env.step(action)
                     step_count += 1
 
+                ep_info = eval_env.get_episode_info()
                 episode_results.append({
                     'symbol': setup['symbol'],
                     'date': setup['date'],
                     'pnl': eval_env.episode_pnl,
-                    'trades': eval_env.episode_trades,
+                    'trades': ep_info['n_trades'],
+                    'action_histogram': ep_info['action_histogram'],
+                    'mean_bars_in_position': ep_info['mean_bars_in_position'],
+                    'median_bars_in_position': ep_info['median_bars_in_position'],
                 })
             except Exception as e:
                 logger.warning(f"  Eval episode {setup['symbol']} {setup['date']} failed: {e}")
@@ -520,6 +533,49 @@ class QuickWFOTrainer:
         mean_episode_pnl = float(np.mean(pnls)) if pnls else 0.0
         winning = sum(1 for p in pnls if p > 0)
         episodes_evaluated = len(episode_results)
+
+        # Phase 1.2: aggregate OOS action distribution across all eval
+        # episodes in this fold. For continuous action spaces the histograms
+        # are all zeros (see env.get_episode_info docstring); we set
+        # action_distribution to None and document via a top-level note so
+        # downstream consumers don't mistake all-zeros for a degenerate
+        # distribution. The discrete-bins count is sourced from the
+        # EnvironmentConfig dataclass default (the trainer doesn't currently
+        # override it; the env config dict only sets action_space_type).
+        # Probabilities sum to 1.0 exactly when total > 0 (integer counts
+        # divided by their sum); when total == 0 (no discrete actions ever
+        # taken, e.g. continuous mode) we emit None.
+        from src.rl.env import EnvironmentConfig as _EnvCfg
+        n_bins = eval_env_config.get(
+            'discrete_action_bins',
+            _EnvCfg.__dataclass_fields__['discrete_action_bins'].default,
+        )
+        action_distribution: Optional[Dict[int, float]] = None
+        if action_space_type == 'discrete' and episode_results:
+            total_action_counts = {i: 0 for i in range(n_bins)}
+            for ep in episode_results:
+                for k, v in ep.get('action_histogram', {}).items():
+                    total_action_counts[int(k)] += int(v)
+            total = sum(total_action_counts.values())
+            if total > 0:
+                action_distribution = {
+                    i: total_action_counts[i] / total for i in range(n_bins)
+                }
+                dist_str = ", ".join(
+                    f"bin_{i}={action_distribution[i]:.3f}" for i in range(n_bins)
+                )
+                logger.info(f"oos_action_distribution fold={fold} {dist_str}")
+            else:
+                logger.warning(
+                    f"oos_action_distribution fold={fold}: zero discrete actions "
+                    f"recorded across {len(episode_results)} episodes"
+                )
+        else:
+            logger.info(
+                f"oos_action_distribution fold={fold}: skipped "
+                f"(action_space_type={action_space_type!r}, histogram is non-meaningful "
+                f"for continuous; n_episodes={len(episode_results)})"
+            )
 
         logger.info(f"\n{'='*70}")
         logger.info(f"TEST RESULTS FOR FOLD {fold} (True PnL)")
@@ -564,6 +620,9 @@ class QuickWFOTrainer:
             'best_checkpoint_timestep': best_checkpoint_timestep,
             'best_eval_reward': best_eval_reward if best_eval_reward != float('-inf') else None,
             'validation_checks': checks,
+            # Phase 1.2: per-fold OOS action distribution (None for continuous)
+            'action_distribution': action_distribution,
+            'action_space_type': action_space_type,
         }
 
         algo.stop()
@@ -977,6 +1036,49 @@ class QuickWFOTrainer:
             logger.error(f"Benchmark error: {e}", exc_info=True)
             benchmark_data = {'error': str(e)}
 
+        # Phase 1.2: aggregate OOS action distribution across ALL folds for
+        # the top-level JSON key. Each fold already aggregated its own
+        # per-episode histograms; we just merge the per-episode results
+        # again (re-summing fold totals would require either storing fold
+        # counts or a weighted average; re-summing from episode-level
+        # histograms is the simpler invariant — one path, one bug surface).
+        action_space_type = getattr(self.config, '_action_space_type', 'continuous')
+        top_action_distribution: Optional[Dict[int, float]] = None
+        if action_space_type == 'discrete' and all_results:
+            # Discover n_bins from the first fold that recorded a non-None
+            # distribution; fall back to any per-episode histogram key.
+            n_bins = None
+            for r in all_results:
+                if r.get('action_distribution'):
+                    n_bins = len(r['action_distribution'])
+                    break
+            if n_bins is None:
+                for r in all_results:
+                    for ep in r.get('per_episode_results', []):
+                        hist = ep.get('action_histogram', {})
+                        if hist:
+                            n_bins = len(hist)
+                            break
+                    if n_bins is not None:
+                        break
+
+            if n_bins:
+                total_counts = {i: 0 for i in range(n_bins)}
+                for r in all_results:
+                    for ep in r.get('per_episode_results', []):
+                        for k, v in ep.get('action_histogram', {}).items():
+                            total_counts[int(k)] += int(v)
+                total = sum(total_counts.values())
+                if total > 0:
+                    top_action_distribution = {
+                        i: total_counts[i] / total for i in range(n_bins)
+                    }
+                    dist_str = ", ".join(
+                        f"bin_{i}={top_action_distribution[i]:.3f}"
+                        for i in range(n_bins)
+                    )
+                    logger.info(f"oos_action_distribution (all folds): {dist_str}")
+
         # Save results
         results_path = Path(self.config.output_dir) / "quick_test_results.json"
         with open(results_path, 'w') as f:
@@ -986,12 +1088,19 @@ class QuickWFOTrainer:
                     'test_months': self.config.test_months,
                     'warmup_timesteps': self.config.warmup_timesteps,
                     'finetune_timesteps': self.config.finetune_timesteps,
+                    'action_space_type': action_space_type,
                 },
                 'folds': all_results,
                 'aggregate': {
                     'avg_test_pnl': avg_pnl,
                     'total_eval_episodes': total_eval_episodes,
                 },
+                # Phase 1.2: top-level aggregated OOS action distribution
+                # (probabilities sum to 1.0 modulo float rounding). None when
+                # action_space_type != 'discrete' OR when no discrete actions
+                # were recorded — see per-fold 'action_distribution' for the
+                # fold-level breakdown.
+                'action_distribution': top_action_distribution,
                 'benchmarks': benchmark_data,
             }, f, indent=2, default=str)
         
