@@ -46,6 +46,20 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+def _discrete_bins_kwarg(config) -> Dict[str, int]:
+    """Return ``{"discrete_action_bins": N}`` if the CLI overrode it, else ``{}``.
+
+    Used to splat into env_config dicts (training + eval) so a None override
+    doesn't replace the env's int default of 7. argparse has already
+    constrained ``N`` to ``{3, 5, 7, 9, 11}`` at parse time, and the env
+    re-validates as defense-in-depth.
+    """
+    n = getattr(config, '_discrete_action_bins', None)
+    if n is None:
+        return {}
+    return {"discrete_action_bins": int(n)}
+
+
 def _detect_data_range(csv_path: Path = None) -> tuple:
     """
     Auto-detect available data range from the CSV setups file.
@@ -190,6 +204,7 @@ class QuickWFOTrainer:
                     "entry_threshold": getattr(self.config, '_entry_threshold', None),
                     "cover_threshold": getattr(self.config, '_cover_threshold', None),
                     "action_space_type": getattr(self.config, '_action_space_type', 'continuous'),
+                    **_discrete_bins_kwarg(self.config),
                     "trades_log_path": str(Path(self.config.output_dir).resolve() / "trades.jsonl"),
                     "dashboard_fold": fold,
                 },
@@ -252,6 +267,37 @@ class QuickWFOTrainer:
         """
         total_timesteps = self.config.total_timesteps
 
+        # Phase 5: PPO hyperparameters are now CLI-tunable (clip_param,
+        # entropy_coeff + optional linear schedule, train_batch_size,
+        # sgd_minibatch_size, num_sgd_iter). Defaults preserve prior
+        # hardcoded values exactly. Build training kwargs as a dict so the
+        # entropy-schedule branch can swap entropy_coeff (constant) for
+        # entropy_coeff_schedule (linear) — RLlib treats these as mutually
+        # exclusive; passing both warns or errors depending on version.
+        training_kwargs: Dict[str, Any] = {
+            "gamma": self.config.gamma,
+            "lr": getattr(self.config, '_lr_actor', 3e-4),
+            "train_batch_size": getattr(self.config, '_ppo_train_batch_size', 4000),
+            "sgd_minibatch_size": getattr(self.config, '_ppo_sgd_minibatch_size', 128),
+            "num_sgd_iter": getattr(self.config, '_ppo_num_sgd_iter', 20),
+            "clip_param": getattr(self.config, '_ppo_clip_param', 0.3),
+            "vf_clip_param": 10.0,
+            "grad_clip": 1.0,
+            "model": {"fcnet_hiddens": [256, 256], "fcnet_activation": "relu"},
+        }
+        entropy_start = getattr(self.config, '_ppo_entropy_coeff', 0.01)
+        entropy_end = getattr(self.config, '_ppo_entropy_anneal_end', None)
+        if entropy_end is not None:
+            # Linear schedule from entropy_start to entropy_end across the
+            # full training horizon. Schedule is a list of [step, value]
+            # waypoints; RLlib linearly interpolates between them.
+            training_kwargs["entropy_coeff_schedule"] = [
+                [0, float(entropy_start)],
+                [int(total_timesteps), float(entropy_end)],
+            ]
+        else:
+            training_kwargs["entropy_coeff"] = entropy_start
+
         ppo_config = (
             PPOConfig()
             .environment(
@@ -272,23 +318,13 @@ class QuickWFOTrainer:
                     "entry_threshold": getattr(self.config, '_entry_threshold', None),
                     "cover_threshold": getattr(self.config, '_cover_threshold', None),
                     "action_space_type": getattr(self.config, '_action_space_type', 'continuous'),
+                    **_discrete_bins_kwarg(self.config),
                     "trades_log_path": str(Path(self.config.output_dir).resolve() / "trades.jsonl"),
                     "dashboard_fold": fold,
                 },
             )
             .framework("torch")
-            .training(
-                gamma=self.config.gamma,
-                lr=getattr(self.config, '_lr_actor', 3e-4),
-                train_batch_size=4000,
-                sgd_minibatch_size=128,
-                num_sgd_iter=20,
-                clip_param=0.3,
-                entropy_coeff=0.01,
-                vf_clip_param=10.0,
-                grad_clip=1.0,
-                model={"fcnet_hiddens": [256, 256], "fcnet_activation": "relu"},
-            )
+            .training(**training_kwargs)
             .rollouts(
                 num_rollout_workers=0,
                 rollout_fragment_length=200,
@@ -459,6 +495,10 @@ class QuickWFOTrainer:
             # would emit ints that the default continuous env clips to +1.0
             # and routes through _discretize_action — silently wrong eval.
             "action_space_type": getattr(self.config, '_action_space_type', 'continuous'),
+            # Mirror the training-time bin count so Discrete eval uses the
+            # same action space the policy was trained against. Omitted when
+            # the CLI didn't override — env falls back to its default (7).
+            **_discrete_bins_kwarg(self.config),
         }
 
         # PPO uses RLlib's default FullyConnectedNetwork, which expects a flat
@@ -541,15 +581,19 @@ class QuickWFOTrainer:
         # action_distribution to None and document via a top-level note so
         # downstream consumers don't mistake all-zeros for a degenerate
         # distribution. The discrete-bins count is sourced from the
-        # EnvironmentConfig dataclass default (the trainer doesn't currently
-        # override it; the env config dict only sets action_space_type).
+        # eval_env_config (which the CLI override propagates into) and
+        # falls back to the EnvironmentConfig field default if not
+        # overridden. Phase 4 prep: switched from
+        # ``__dataclass_fields__[...].default`` (fragile — breaks if the
+        # field gains a default_factory) to a direct
+        # ``EnvironmentConfig().discrete_action_bins`` read.
         # Probabilities sum to 1.0 exactly when total > 0 (integer counts
         # divided by their sum); when total == 0 (no discrete actions ever
         # taken, e.g. continuous mode) we emit None.
         from src.rl.env import EnvironmentConfig as _EnvCfg
         n_bins = eval_env_config.get(
             'discrete_action_bins',
-            _EnvCfg.__dataclass_fields__['discrete_action_bins'].default,
+            _EnvCfg().discrete_action_bins,
         )
         action_distribution: Optional[Dict[int, float]] = None
         if action_space_type == 'discrete' and episode_results:
@@ -1082,15 +1126,32 @@ class QuickWFOTrainer:
 
         # Save results
         results_path = Path(self.config.output_dir) / "quick_test_results.json"
+        algo_choice = getattr(self.config, '_algo', 'sac')
+        config_block: Dict[str, Any] = {
+            'train_months': self.config.train_months,
+            'test_months': self.config.test_months,
+            'warmup_timesteps': self.config.warmup_timesteps,
+            'finetune_timesteps': self.config.finetune_timesteps,
+            'action_space_type': action_space_type,
+            'algo': algo_choice,
+        }
+        # Phase 5: record actual PPO hyperparameters used (for reproducibility
+        # across sweep runs). Only emitted when algo == 'ppo' so SAC runs
+        # don't carry irrelevant fields. lr is sourced from the shared
+        # --lr-actor flag (which PPOConfig.training receives as `lr`).
+        if algo_choice == 'ppo':
+            config_block['ppo_hyperparameters'] = {
+                'clip_param': getattr(self.config, '_ppo_clip_param', 0.3),
+                'entropy_coeff': getattr(self.config, '_ppo_entropy_coeff', 0.01),
+                'entropy_anneal_end': getattr(self.config, '_ppo_entropy_anneal_end', None),
+                'train_batch_size': getattr(self.config, '_ppo_train_batch_size', 4000),
+                'sgd_minibatch_size': getattr(self.config, '_ppo_sgd_minibatch_size', 128),
+                'num_sgd_iter': getattr(self.config, '_ppo_num_sgd_iter', 20),
+                'lr': getattr(self.config, '_lr_actor', 3e-4),
+            }
         with open(results_path, 'w') as f:
             json.dump({
-                'config': {
-                    'train_months': self.config.train_months,
-                    'test_months': self.config.test_months,
-                    'warmup_timesteps': self.config.warmup_timesteps,
-                    'finetune_timesteps': self.config.finetune_timesteps,
-                    'action_space_type': action_space_type,
-                },
+                'config': config_block,
                 'folds': all_results,
                 'aggregate': {
                     'avg_test_pnl': avg_pnl,
@@ -1207,10 +1268,40 @@ def main():
         '--action-space', type=str, default='continuous',
         choices=['continuous', 'discrete'],
         help='Action space: continuous (default, Box(-1,1)) or discrete '
-             '(Discrete(7), bypasses _discretize_action). Designed for use '
+             '(Discrete(N), bypasses _discretize_action). Designed for use '
              'with --algo ppo. See docs/ppo_continuous_smoke_2026-05-19.md '
-             'for the motivation.',
+             'for the motivation. Bin count N is controlled by '
+             '--discrete-action-bins (default 7).',
     )
+    parser.add_argument(
+        '--discrete-action-bins', type=int, default=None,
+        choices=[3, 5, 7, 9, 11],
+        help='Number of discrete action bins. Must be in {3, 5, 7, 9, 11}. '
+             "Default: env's default (7). Only meaningful with "
+             '--action-space discrete. See EnvironmentConfig.discrete_action_bins '
+             'in src/rl/env.py for the bin-layout table. argparse rejects '
+             'unsupported values at parse time; the env re-validates as '
+             'defense-in-depth.',
+    )
+    # PPO hyperparameters (Phase 5: unblock GPU sweeps). Defaults preserve
+    # the prior hardcoded values exactly; --lr-actor (already defined above)
+    # propagates to PPOConfig.training(lr=...).
+    parser.add_argument('--ppo-clip-param', type=float, default=0.3,
+                        help='PPO clipped surrogate objective epsilon. RLlib default 0.3.')
+    parser.add_argument('--ppo-entropy-coeff', type=float, default=0.01,
+                        help='PPO entropy bonus coefficient (constant if --ppo-entropy-anneal-end '
+                             'is not set; otherwise linearly anneals from this value to that one '
+                             'over --total-steps).')
+    parser.add_argument('--ppo-entropy-anneal-end', type=float, default=None,
+                        help='If set, anneal entropy_coeff linearly from --ppo-entropy-coeff to '
+                             'this value over --total-steps. Uses entropy_coeff_schedule (mutually '
+                             'exclusive with entropy_coeff in RLlib).')
+    parser.add_argument('--ppo-train-batch-size', type=int, default=4000,
+                        help='PPO on-policy rollout batch size per training iteration.')
+    parser.add_argument('--ppo-sgd-minibatch-size', type=int, default=128,
+                        help='PPO SGD minibatch size used inside each epoch.')
+    parser.add_argument('--ppo-num-sgd-iter', type=int, default=20,
+                        help='PPO number of SGD epochs per training iteration.')
 
     args = parser.parse_args()
 
@@ -1269,6 +1360,19 @@ def main():
     config._cover_threshold = args.cover_threshold
     config._algo = args.algo
     config._action_space_type = args.action_space
+    # Phase 4 prep: optional bin-count override for the Discrete action space.
+    # None = use the EnvironmentConfig default (currently 7). Otherwise must
+    # be a value in {3, 5, 7, 9, 11} (argparse already enforces this).
+    config._discrete_action_bins = args.discrete_action_bins
+    # PPO hyperparameters (Phase 5 sweep surface). Stored on config so
+    # create_ppo_config() can read them at fold-build time. SAC ignores
+    # these (its create_sac_config() doesn't touch them).
+    config._ppo_clip_param = args.ppo_clip_param
+    config._ppo_entropy_coeff = args.ppo_entropy_coeff
+    config._ppo_entropy_anneal_end = args.ppo_entropy_anneal_end
+    config._ppo_train_batch_size = args.ppo_train_batch_size
+    config._ppo_sgd_minibatch_size = args.ppo_sgd_minibatch_size
+    config._ppo_num_sgd_iter = args.ppo_num_sgd_iter
 
     trainer = QuickWFOTrainer(config)
     results = trainer.run()

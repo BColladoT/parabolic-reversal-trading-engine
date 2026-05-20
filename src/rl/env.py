@@ -36,6 +36,28 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+# Supported bin counts for the Discrete action space. See
+# EnvironmentConfig.discrete_action_bins for the full layout documentation.
+# ENTRY magnitudes are negative (short exposure). COVER magnitudes are positive
+# (fraction of current position to close). All ladders are ASCENDING in
+# absolute magnitude so bin index 1 is always the smallest non-HOLD action —
+# matches the historical N=7 convention enforced by
+# tests/test_env_discrete_action.test_discrete_bin_semantics_math.
+_DISCRETE_BIN_LAYOUTS: Dict[int, Tuple[Tuple[float, ...], Tuple[float, ...]]] = {
+    3:  ((-1.00,),
+         (1.00,)),
+    5:  ((-0.50, -1.00),
+         (0.50, 1.00)),
+    7:  ((-0.25, -0.50, -1.00),
+         (0.25, 0.50, 1.00)),
+    9:  ((-0.25, -0.50, -0.75, -1.00),
+         (0.25, 0.50, 0.75, 1.00)),
+    11: ((-0.10, -0.25, -0.50, -0.75, -1.00),
+         (0.10, 0.25, 0.50, 0.75, 1.00)),
+}
+SUPPORTED_DISCRETE_BIN_COUNTS = tuple(sorted(_DISCRETE_BIN_LAYOUTS.keys()))
+
+
 def r_multiple_reward_term(
     realized_r: float,
     weight: float,
@@ -254,11 +276,41 @@ class EnvironmentConfig:
     # discretization layer is an additional, separable bottleneck.
     action_space_type: str = "continuous"
 
-    # Number of bins for Discrete action space. Default 7:
-    #   0=HOLD,
-    #   1-3=ENTRY at exposure_fraction in {-0.25, -0.50, -1.00},
-    #   4-6=COVER fraction in {0.25, 0.50, 1.00}.
+    # Number of bins for Discrete action space. Default 7. Supported values:
+    # {3, 5, 7, 9, 11}. All layouts use ASCENDING magnitude (smallest first),
+    # matching the historical N=7 convention. The HOLD bin is always 0; ENTRY
+    # bins fill [1, 1+n_entry), COVER bins fill [1+n_entry, N), where
+    # n_entry = (N - 1) // 2 and n_cover = (N - 1) - n_entry.
+    #
+    #   N=3:  0=HOLD, 1=ENTRY-100%, 2=COVER+100%
+    #   N=5:  0=HOLD, 1-2=ENTRY {-0.50, -1.00}, 3-4=COVER {0.50, 1.00}
+    #   N=7:  0=HOLD, 1-3=ENTRY {-0.25, -0.50, -1.00}, 4-6=COVER {0.25, 0.50, 1.00}
+    #   N=9:  0=HOLD, 1-4=ENTRY {-0.25, -0.50, -0.75, -1.00},
+    #         5-8=COVER {0.25, 0.50, 0.75, 1.00}
+    #   N=11: 0=HOLD, 1-5=ENTRY {-0.10, -0.25, -0.50, -0.75, -1.00},
+    #         6-10=COVER {0.10, 0.25, 0.50, 0.75, 1.00}
+    #
+    # Unsupported N raises ValueError at env construction (validated in
+    # ParabolicReversalEnv.__init__ after env_config overrides are applied).
     discrete_action_bins: int = 7
+
+    def __post_init__(self):
+        """Validate config invariants at construction time.
+
+        Currently enforces:
+          - ``discrete_action_bins`` must be in
+            ``SUPPORTED_DISCRETE_BIN_COUNTS`` (= {3, 5, 7, 9, 11}).
+            The check fires for both the default-constructed config and any
+            direct ``EnvironmentConfig(discrete_action_bins=N)`` call. The
+            env's ``__init__`` re-validates after applying env_config dict
+            overrides (the RLlib EnvContext path mutates the field via
+            ``setattr``, which bypasses ``__post_init__``).
+        """
+        if self.discrete_action_bins not in _DISCRETE_BIN_LAYOUTS:
+            raise ValueError(
+                f"discrete_action_bins must be in {SUPPORTED_DISCRETE_BIN_COUNTS}, "
+                f"got {self.discrete_action_bins}"
+            )
 
 
 class PercentileRewardScaler:
@@ -387,7 +439,19 @@ class ParabolicReversalEnv(gym.Env):
             self.date_range = None
             self.env_seed = None
             self.mode = "train"
-            
+
+        # Re-validate discrete_action_bins after env_config overrides have
+        # been applied. EnvironmentConfig.__post_init__ catches direct
+        # construction with a bad value, but the RLlib EnvContext path
+        # above mutates the field via setattr() — which bypasses
+        # __post_init__. Fail fast here so unsupported N can't silently
+        # produce a malformed action space / mask.
+        if self.config.discrete_action_bins not in _DISCRETE_BIN_LAYOUTS:
+            raise ValueError(
+                f"discrete_action_bins must be in {SUPPORTED_DISCRETE_BIN_COUNTS}, "
+                f"got {self.config.discrete_action_bins}"
+            )
+
         self.initial_capital = initial_capital
         self.render_mode = render_mode
 
@@ -1407,37 +1471,51 @@ class ParabolicReversalEnv(gym.Env):
             return 2  # Action 2: Hold
 
     def _apply_discrete_action(self, action_int: int) -> tuple:
-        """Decode a Discrete(7) action into (action_type, desired_exposure_fraction).
+        """Decode a Discrete(N) action into (action_type, desired_exposure_fraction).
 
         Returns the same (action_type, magnitude) tuple that the continuous
         path produces after _discretize_action; downstream step() code consumes
-        them identically.
+        them identically. Action-type encoding: 0=ENTRY, 1=COVER, 2=HOLD.
 
-        Bin layout (for discrete_action_bins == 7):
-            0: HOLD                            -> (action_type=2, magnitude=0.0)
-            1: ENTRY exposure_fraction=-0.25   -> (0, -0.25)
-            2: ENTRY exposure_fraction=-0.50   -> (0, -0.50)
-            3: ENTRY exposure_fraction=-1.00   -> (0, -1.00)
-            4: COVER 25% of current position   -> (1, +0.25)
-            5: COVER 50%                       -> (1, +0.50)
-            6: COVER 100% (full exit)          -> (1, +1.00)
+        Supports N in {3, 5, 7, 9, 11}; see ``_DISCRETE_BIN_LAYOUTS`` at module
+        scope and ``EnvironmentConfig.discrete_action_bins`` for the full
+        layout table. All ladders are ASCENDING in absolute magnitude (bin 1
+        is always the smallest non-HOLD action) so the historical N=7
+        semantics (bin 1 = ENTRY-25%, bin 3 = ENTRY-100%) are preserved.
 
         Designed for PPO with a categorical policy head — no Gaussian noise,
         no policy.compute -> discretize round-trip. See
         docs/ppo_continuous_smoke_2026-05-19.md for the prior result that
         motivated keeping this purely as an additive experiment.
+
+        Raises:
+            ValueError: if the env was constructed with an unsupported
+                ``discrete_action_bins`` value, or if ``action_int`` is
+                outside ``[0, N-1]``.
         """
+        n_bins = self.config.discrete_action_bins
+        try:
+            entry_mags, cover_mags = _DISCRETE_BIN_LAYOUTS[n_bins]
+        except KeyError as exc:
+            raise ValueError(
+                f"discrete_action_bins must be in {SUPPORTED_DISCRETE_BIN_COUNTS}, "
+                f"got {n_bins}"
+            ) from exc
+
         action_int = int(action_int)
         if action_int == 0:
             return (2, 0.0)  # HOLD
-        if action_int in (1, 2, 3):
-            mags = {1: -0.25, 2: -0.50, 3: -1.00}
-            return (0, mags[action_int])  # ENTRY
-        if action_int in (4, 5, 6):
-            mags = {4: 0.25, 5: 0.50, 6: 1.00}
-            return (1, mags[action_int])  # COVER
+
+        n_entry = len(entry_mags)
+        # ENTRY range: [1, 1+n_entry)
+        if 1 <= action_int < 1 + n_entry:
+            return (0, entry_mags[action_int - 1])  # ENTRY
+        # COVER range: [1+n_entry, N)
+        if 1 + n_entry <= action_int < n_bins:
+            return (1, cover_mags[action_int - 1 - n_entry])  # COVER
+
         raise ValueError(
-            f"Discrete action {action_int} out of range [0, {self.config.discrete_action_bins - 1}]"
+            f"Discrete action {action_int} out of range [0, {n_bins - 1}]"
         )
 
     def _compute_cover_target(self, desired_exposure_fraction: float) -> float:
@@ -1498,8 +1576,10 @@ class ParabolicReversalEnv(gym.Env):
     def _compute_discrete_action_mask(self) -> np.ndarray:
         """Discrete(N) action mask. Project the 3 conceptual gates onto bins.
 
-        Bin layout (for discrete_action_bins == 7):
-            0 = HOLD, 1..3 = ENTRY (3 magnitudes), 4..6 = COVER (3 magnitudes).
+        Supports N in ``SUPPORTED_DISCRETE_BIN_COUNTS`` (= {3, 5, 7, 9, 11}).
+        Bin layout: bin 0 = HOLD; bins [1, 1+n_entry) = ENTRY magnitudes;
+        bins [1+n_entry, N) = COVER magnitudes — where
+        ``n_entry = (N - 1) // 2`` and ``n_cover = (N - 1) - n_entry``.
         Each conceptual gate (entry_ok / cover_ok / hold_ok) toggles its
         corresponding contiguous bin range.
         """
@@ -1534,15 +1614,17 @@ class ParabolicReversalEnv(gym.Env):
             if current_exposure >= self.config.max_position_value:
                 entry_ok = 0
 
-        # Project onto bins
+        # Project onto bins. Layout is parameterized by n_entry_bins; works for
+        # every supported N including the degenerate N=3 case (1 ENTRY + 1 COVER).
+        n_entry_bins = (n_bins - 1) // 2
         # bin 0: HOLD
         mask[0] = int(hold_ok)
-        # bins 1..3: ENTRY (assumes 7-bin layout; generalize if discrete_action_bins changes)
-        if n_bins >= 4:
-            mask[1:4] = int(entry_ok)
-        # bins 4..6: COVER
-        if n_bins >= 7:
-            mask[4:7] = int(cover_ok)
+        # bins [1, 1+n_entry_bins): ENTRY
+        if n_entry_bins > 0:
+            mask[1:1 + n_entry_bins] = int(entry_ok)
+        # bins [1+n_entry_bins, n_bins): COVER
+        if n_bins - 1 - n_entry_bins > 0:
+            mask[1 + n_entry_bins:n_bins] = int(cover_ok)
         return mask
     
     def _calculate_kelly_constrained_leverage(self) -> float:
