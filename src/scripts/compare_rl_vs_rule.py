@@ -5,8 +5,15 @@ This script runs the rule baseline on the same WFO folds as RL
 and generates a direct comparison report with verdicts.
 
 Usage:
+    # Single-seed
     python -m src.scripts.compare_rl_vs_rule \
         --rl-results models/wfo/wfo_results.json \
+        --output reports/rl_vs_rule_comparison.json
+
+    # Multi-seed (rule baseline runs once on the shared setup list)
+    python -m src.scripts.compare_rl_vs_rule \
+        --rl-results models/run/s1.json models/run/s2.json models/run/s3.json \
+        --run-baseline \
         --output reports/rl_vs_rule_comparison.json
 """
 
@@ -40,6 +47,24 @@ def load_rl_results(path: str) -> Dict[str, Any]:
     """Load RL results from train_wfo.py output."""
     with open(path, 'r') as f:
         return json.load(f)
+
+
+def _read_metric(d: Dict[str, Any], *keys, default=None):
+    """
+    Read the first present key from ``d``.
+
+    Used to bridge naming differences between writers:
+      - Full WFO (``train_wfo.py``):  ``total_test_pnl`` / ``mean_episode_pnl`` /
+        ``episodes_evaluated`` / ``win_rate``
+      - Quick-test (``train_wfo_quick_test.py``): ``test_pnl_total`` /
+        ``test_pnl_mean`` / ``test_episodes_evaluated`` / ``test_win_rate``
+
+    Returns ``default`` if none of the keys are present.
+    """
+    for k in keys:
+        if k in d:
+            return d[k]
+    return default
 
 
 def _extract_test_setups(fold_data: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -88,21 +113,25 @@ def compare_fold_metrics(
     
     Returns comparison with difference, ratio, and verdict.
     """
-    if rl_metrics.get('episodes_evaluated', 0) == 0:
+    # RL metric keys differ between quick-test and full WFO writers; bridge both.
+    rl_episodes = _read_metric(
+        rl_metrics, 'episodes_evaluated', 'test_episodes_evaluated', default=0
+    )
+    if rl_episodes == 0:
         return {'error': 'RL has no valid evaluations'}
     if rule_metrics.get('episodes_evaluated', 0) == 0:
         return {'error': 'Rule baseline has no valid evaluations'}
-    
-    # Extract key metrics
-    rl_pnl = rl_metrics['total_test_pnl']
+
+    # Extract key metrics (RL: dual-key bridge; rule: single-key, deterministic).
+    rl_pnl = _read_metric(rl_metrics, 'total_test_pnl', 'test_pnl_total')
     rule_pnl = rule_metrics['total_test_pnl']
-    
+
     # Calculate improvement percentage
     if rule_pnl != 0:
         pnl_improvement_pct = ((rl_pnl - rule_pnl) / abs(rule_pnl)) * 100
     else:
         pnl_improvement_pct = float('inf') if rl_pnl > 0 else float('-inf') if rl_pnl < 0 else 0
-    
+
     # Determine verdict
     if pnl_improvement_pct >= 10:
         verdict = "PASS"
@@ -113,20 +142,35 @@ def compare_fold_metrics(
     else:
         verdict = "FAIL"
         verdict_reason = f"RL underperforms rule by {abs(pnl_improvement_pct):.1f}%"
-    
+
+    rl_win_rate = _read_metric(rl_metrics, 'win_rate', 'test_win_rate')
+    rl_mean_pnl = _read_metric(rl_metrics, 'mean_episode_pnl', 'test_pnl_mean')
+    rl_total_trades = _read_metric(rl_metrics, 'total_trades')
+    rl_avg_trades = _read_metric(rl_metrics, 'mean_trades_per_episode')
+    # Quick-test writer doesn't emit fold-level trade counts; derive from
+    # per_episode_results so the comparison row isn't full of nulls.
+    if rl_total_trades is None or rl_avg_trades is None:
+        per_ep = rl_metrics.get('per_episode_results') or []
+        trades_per_ep = [ep.get('trades', 0) for ep in per_ep]
+        if trades_per_ep:
+            if rl_total_trades is None:
+                rl_total_trades = int(sum(trades_per_ep))
+            if rl_avg_trades is None:
+                rl_avg_trades = float(np.mean(trades_per_ep))
+
     return {
         'rl_total_pnl': rl_pnl,
         'rule_total_pnl': rule_pnl,
         'pnl_difference': rl_pnl - rule_pnl,
         'pnl_improvement_pct': pnl_improvement_pct,
         'pnl_ratio': rl_pnl / rule_pnl if rule_pnl != 0 else None,
-        'rl_win_rate': rl_metrics['win_rate'],
+        'rl_win_rate': rl_win_rate,
         'rule_win_rate': rule_metrics['win_rate'],
-        'rl_mean_pnl': rl_metrics['mean_episode_pnl'],
+        'rl_mean_pnl': rl_mean_pnl,
         'rule_mean_pnl': rule_metrics['mean_episode_pnl'],
-        'rl_total_trades': rl_metrics['total_trades'],
+        'rl_total_trades': rl_total_trades,
         'rule_total_trades': rule_metrics['total_trades'],
-        'rl_avg_trades_per_ep': rl_metrics['mean_trades_per_episode'],
+        'rl_avg_trades_per_ep': rl_avg_trades,
         'rule_avg_trades_per_ep': rule_metrics['mean_trades_per_episode'],
         'verdict': verdict,
         'verdict_reason': verdict_reason
@@ -224,9 +268,26 @@ def generate_comparison_report(
         rule_fs = rule_fixed_shares_results[i] if i < len(rule_fixed_shares_results) else None
         rule_frac = rule_fraction_results[i] if i < len(rule_fraction_results) else None
         
-        # RL metrics
+        # RL metrics — bridge key naming between quick-test and full WFO writers.
         rl_metrics = rl_fold.get('test_metrics', rl_fold)
-        
+
+        # Quick-test JSONs don't emit fold-level total_trades / mean_trades_per_episode;
+        # derive them from per_episode_results so per_fold isn't full of nulls.
+        rl_total_trades = _read_metric(rl_metrics, 'total_trades')
+        rl_mean_trades = _read_metric(rl_metrics, 'mean_trades_per_episode')
+        if rl_total_trades is None or rl_mean_trades is None:
+            per_ep = (
+                rl_metrics.get('per_episode_results')
+                or rl_fold.get('per_episode_results')
+                or []
+            )
+            trades_per_ep = [ep.get('trades', 0) for ep in per_ep]
+            if trades_per_ep:
+                if rl_total_trades is None:
+                    rl_total_trades = int(sum(trades_per_ep))
+                if rl_mean_trades is None:
+                    rl_mean_trades = float(np.mean(trades_per_ep))
+
         fold_comparison = {
             'fold': fold_num,
             'test_window': {
@@ -234,11 +295,11 @@ def generate_comparison_report(
                 'end': rl_fold.get('test_end', '')
             },
             'rl_metrics': {
-                'total_test_pnl': rl_metrics.get('total_test_pnl'),
-                'mean_episode_pnl': rl_metrics.get('mean_episode_pnl'),
-                'win_rate': rl_metrics.get('win_rate'),
-                'total_trades': rl_metrics.get('total_trades'),
-                'mean_trades_per_episode': rl_metrics.get('mean_trades_per_episode')
+                'total_test_pnl': _read_metric(rl_metrics, 'total_test_pnl', 'test_pnl_total'),
+                'mean_episode_pnl': _read_metric(rl_metrics, 'mean_episode_pnl', 'test_pnl_mean'),
+                'win_rate': _read_metric(rl_metrics, 'win_rate', 'test_win_rate'),
+                'total_trades': rl_total_trades,
+                'mean_trades_per_episode': rl_mean_trades,
             }
         }
         
@@ -512,7 +573,9 @@ def _build_headline_summary(
         rl_win_rate_per_seed.append(wins / len(pnls) if pnls else 0.0)
 
     rl_mean_total = float(np.mean(rl_total_per_seed)) if rl_total_per_seed else None
-    rl_std_total = float(np.std(rl_total_per_seed)) if len(rl_total_per_seed) > 1 else 0.0
+    # Sample stddev (ddof=1): we're measuring spread across a small sample of
+    # seeds, not the population. Default ddof=0 would be biased low for n=3.
+    rl_std_total = float(np.std(rl_total_per_seed, ddof=1)) if len(rl_total_per_seed) > 1 else 0.0
     rl_mean_win_rate = float(np.mean(rl_win_rate_per_seed)) if rl_win_rate_per_seed else None
 
     # Rule baseline (single deterministic run on the same setups)
@@ -575,11 +638,13 @@ def _build_headline_summary(
 
 def main():
     parser = argparse.ArgumentParser(description='Compare RL vs Rule Baseline')
-    parser.add_argument('--rl-results', type=str, required=True,
-                        help='Path to RL results JSON from train_wfo.py. May be '
-                             'a comma-separated list of paths to average across '
+    parser.add_argument('--rl-results', nargs='+', required=True,
+                        help='Path(s) to RL results JSON from train_wfo.py. Pass '
+                             'multiple paths (space-separated) to average across '
                              'seeds (rule baseline is deterministic, so it runs '
-                             'once on the shared setup list).')
+                             'once on the shared setup list). Example: '
+                             '--rl-results models/run/s1.json models/run/s2.json '
+                             'models/run/s3.json')
     parser.add_argument('--output', type=str, default='reports/rl_vs_rule_comparison.json',
                         help='Output path for comparison report')
     parser.add_argument('--run-baseline', action='store_true',
@@ -589,8 +654,8 @@ def main():
 
     args = parser.parse_args()
 
-    # Support multi-seed averaging: --rl-results can be a comma-separated list.
-    rl_result_paths = [p.strip() for p in args.rl_results.split(',') if p.strip()]
+    # Support multi-seed averaging: --rl-results accepts one or more paths.
+    rl_result_paths = [p for p in args.rl_results if p]
     rl_results_all_seeds = [load_rl_results(p) for p in rl_result_paths]
     # Use the first one as "primary" for setup-list / dates / per-fold loop
     rl_results = rl_results_all_seeds[0]

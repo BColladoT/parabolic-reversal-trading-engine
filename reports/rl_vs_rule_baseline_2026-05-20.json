@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-20T21:22:18.915492",
+  "generated_at": "2026-05-20T21:40:17.261258",
   "comparison_methodology": "Same test setups, same execution/accounting",
   "sizing_modes_compared": [
     "fixed_shares",
@@ -13,36 +13,64 @@
         "end": "2024-12-30T00:00:00"
       },
       "rl_metrics": {
-        "total_test_pnl": null,
-        "mean_episode_pnl": null,
-        "win_rate": null,
-        "total_trades": null,
-        "mean_trades_per_episode": null
+        "total_test_pnl": -1648.7612573968072,
+        "mean_episode_pnl": -117.76866124262908,
+        "win_rate": 0.21428571428571427,
+        "total_trades": 13,
+        "mean_trades_per_episode": 0.9285714285714286
       },
       "vs_fixed_shares": {
-        "error": "RL has no valid evaluations"
+        "rl_total_pnl": -1648.7612573968072,
+        "rule_total_pnl": -2160.189902625847,
+        "pnl_difference": 511.42864522903983,
+        "pnl_improvement_pct": 23.675170623071892,
+        "pnl_ratio": 0.763248293769281,
+        "rl_win_rate": 0.21428571428571427,
+        "rule_win_rate": 0.35714285714285715,
+        "rl_mean_pnl": -117.76866124262908,
+        "rule_mean_pnl": -154.29927875898906,
+        "rl_total_trades": 13,
+        "rule_total_trades": 13,
+        "rl_avg_trades_per_ep": 0.9285714285714286,
+        "rule_avg_trades_per_ep": 0.9285714285714286,
+        "verdict": "PASS",
+        "verdict_reason": "RL beats rule by 23.7% (>= 10% threshold)"
       },
       "vs_fraction_of_equity": {
-        "error": "RL has no valid evaluations"
+        "rl_total_pnl": -1648.7612573968072,
+        "rule_total_pnl": -2160.189902625847,
+        "pnl_difference": 511.42864522903983,
+        "pnl_improvement_pct": 23.675170623071892,
+        "pnl_ratio": 0.763248293769281,
+        "rl_win_rate": 0.21428571428571427,
+        "rule_win_rate": 0.35714285714285715,
+        "rl_mean_pnl": -117.76866124262908,
+        "rule_mean_pnl": -154.29927875898906,
+        "rl_total_trades": 13,
+        "rule_total_trades": 13,
+        "rl_avg_trades_per_ep": 0.9285714285714286,
+        "rule_avg_trades_per_ep": 0.9285714285714286,
+        "verdict": "PASS",
+        "verdict_reason": "RL beats rule by 23.7% (>= 10% threshold)"
       }
     }
   ],
   "aggregate": {
     "total_folds": 1,
     "vs_fixed_shares": {
-      "pass_count": 0,
+      "pass_count": 1,
       "marginal_count": 0,
       "fail_count": 0,
-      "overall_verdict": "MARGINAL"
+      "overall_verdict": "PASS"
     },
     "vs_fraction_of_equity": {
-      "pass_count": 0,
+      "pass_count": 1,
       "marginal_count": 0,
       "fail_count": 0,
-      "overall_verdict": "MARGINAL"
+      "overall_verdict": "PASS"
     }
   },
-  "final_conclusion": "RL shows MARGINAL improvement over rule baseline",
+  "final_conclusion": "RL PASSES - demonstrates clear value over rule baseline",
   "summary_fixed_shares": {
     "sizing_mode": "fixed_shares",
     "n_setups": 14,
@@ -116,7 +144,7 @@
         -1900.7384599091893,
         -1279.2414498723956
       ],
-      "total_test_pnl_std_across_seeds": 255.23321192446693,
+      "total_test_pnl_std_across_seeds": 312.59556731329343,
       "win_rate": 0.21428571428571427,
       "win_rate_per_seed": [
         0.21428571428571427,
@@ -333,7 +361,7 @@
         -1900.7384599091893,
         -1279.2414498723956
       ],
-      "total_test_pnl_std_across_seeds": 255.23321192446693,
+      "total_test_pnl_std_across_seeds": 312.59556731329343,
       "win_rate": 0.21428571428571427,
       "win_rate_per_seed": [
         0.21428571428571427,
@@ -478,8 +506,8 @@
     }
   },
   "rl_results_paths": [
-    "models/ppo_discrete_test/w0.00_s1/quick_test_results.json",
-    "models/ppo_discrete_test/w0.00_s2/quick_test_results.json",
-    "models/ppo_discrete_test/w0.00_s3/quick_test_results.json"
+    "C:\\quant_trading\\models\\ppo_discrete_test\\w0.00_s1\\quick_test_results.json",
+    "C:\\quant_trading\\models\\ppo_discrete_test\\w0.00_s2\\quick_test_results.json",
+    "C:\\quant_trading\\models\\ppo_discrete_test\\w0.00_s3\\quick_test_results.json"
   ]
 }
