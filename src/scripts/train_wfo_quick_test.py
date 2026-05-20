@@ -189,6 +189,7 @@ class QuickWFOTrainer:
                     "hold_band_threshold": getattr(self.config, '_hold_band_threshold', 0.05),
                     "entry_threshold": getattr(self.config, '_entry_threshold', None),
                     "cover_threshold": getattr(self.config, '_cover_threshold', None),
+                    "action_space_type": getattr(self.config, '_action_space_type', 'continuous'),
                     "trades_log_path": str(Path(self.config.output_dir).resolve() / "trades.jsonl"),
                     "dashboard_fold": fold,
                 },
@@ -270,6 +271,7 @@ class QuickWFOTrainer:
                     "hold_band_threshold": getattr(self.config, '_hold_band_threshold', 0.05),
                     "entry_threshold": getattr(self.config, '_entry_threshold', None),
                     "cover_threshold": getattr(self.config, '_cover_threshold', None),
+                    "action_space_type": getattr(self.config, '_action_space_type', 'continuous'),
                     "trades_log_path": str(Path(self.config.output_dir).resolve() / "trades.jsonl"),
                     "dashboard_fold": fold,
                 },
@@ -452,6 +454,11 @@ class QuickWFOTrainer:
             "mode": "eval",
             "trades_log_path": str(Path(self.config.output_dir).resolve() / "trades.jsonl"),
             "dashboard_fold": fold,
+            # Must match training-time action space so the policy's actions are
+            # interpreted correctly. Without this, a Discrete-trained policy
+            # would emit ints that the default continuous env clips to +1.0
+            # and routes through _discretize_action — silently wrong eval.
+            "action_space_type": getattr(self.config, '_action_space_type', 'continuous'),
         }
 
         # PPO uses RLlib's default FullyConnectedNetwork, which expects a flat
@@ -1086,8 +1093,24 @@ def main():
              'swap holding the action space constant — see '
              'docs/rl_investigation_synthesis_2026-05-19.md.',
     )
+    parser.add_argument(
+        '--action-space', type=str, default='continuous',
+        choices=['continuous', 'discrete'],
+        help='Action space: continuous (default, Box(-1,1)) or discrete '
+             '(Discrete(7), bypasses _discretize_action). Designed for use '
+             'with --algo ppo. See docs/ppo_continuous_smoke_2026-05-19.md '
+             'for the motivation.',
+    )
 
     args = parser.parse_args()
+
+    # Combination guard: SAC has a masked Gaussian policy on Box; it does not
+    # support the Discrete action space. Fail fast rather than letting RLlib
+    # crash deep in the model wiring.
+    if args.algo == 'sac' and args.action_space == 'discrete':
+        parser.error("--algo sac is incompatible with --action-space discrete "
+                     "(SAC's masked Gaussian model is built for Box actions). "
+                     "Use --algo ppo for discrete experiments.")
 
     # Reproducibility: seed every RNG that matters.
     import random as _stdlib_random
@@ -1135,6 +1158,7 @@ def main():
     config._entry_threshold = args.entry_threshold
     config._cover_threshold = args.cover_threshold
     config._algo = args.algo
+    config._action_space_type = args.action_space
 
     trainer = QuickWFOTrainer(config)
     results = trainer.run()

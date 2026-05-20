@@ -244,6 +244,22 @@ class EnvironmentConfig:
     action_space_low: float = -1.0
     action_space_high: float = 1.0
 
+    # Action space type: "continuous" (default, Box(-1,1,(1,))) or "discrete"
+    # (Discrete(N)). Discrete mode bypasses _discretize_action; the agent
+    # emits a categorical action directly, eliminating Gaussian-policy-noise
+    # interaction with the continuous→discrete mapping that motivated PRs
+    # #11, #13, #15. Designed for use with PPO (--algo ppo). PPO continuous
+    # already beats SAC at the action-space-constant comparison (see
+    # docs/ppo_continuous_smoke_2026-05-19.md); Discrete tests whether the
+    # discretization layer is an additional, separable bottleneck.
+    action_space_type: str = "continuous"
+
+    # Number of bins for Discrete action space. Default 7:
+    #   0=HOLD,
+    #   1-3=ENTRY at exposure_fraction in {-0.25, -0.50, -1.00},
+    #   4-6=COVER fraction in {0.25, 0.50, 1.00}.
+    discrete_action_bins: int = 7
+
 
 class PercentileRewardScaler:
     """DEPRECATED: Normalizes rewards using running percentiles.
@@ -351,12 +367,16 @@ class ParabolicReversalEnv(gym.Env):
         elif hasattr(config, 'get'):
             env_context = dict(config)
             self.config = EnvironmentConfig()
-            for key in ['initial_capital', 'max_drawdown', 'circuit_breaker_threshold',
-                        'reward_scale', 'max_acceptable_drawdown', 'annealer_total_timesteps',
-                        'intra_step_stop_loss', 'max_position_capital_fraction',
-                        'min_vwap_deviation_entry', 'transaction_cost_per_dollar']:
-                if key in env_context:
-                    setattr(self.config, key, env_context[key])
+            # Iterate over the dataclass fields so newly added EnvironmentConfig
+            # fields automatically plumb through env_config without having to
+            # maintain a separate allowlist. (The prior allowlist had drifted —
+            # hold_band_threshold, r_multiple_reward_weight, mfe_evaporation_
+            # penalty_max, entry/cover_threshold, action_space_type, etc. were
+            # all silently falling back to defaults.)
+            import dataclasses as _dc
+            for _field in _dc.fields(self.config):
+                if _field.name in env_context:
+                    setattr(self.config, _field.name, env_context[_field.name])
             initial_capital = env_context.get('initial_capital', initial_capital)
             # Extract WFO-critical parameters
             self.date_range = env_context.get('date_range', None)
@@ -456,18 +476,25 @@ class ParabolicReversalEnv(gym.Env):
         self._trade_shares = 0.0
         self._trade_entry_vwap = 0.0
         
-        # Define action space: continuous [-1, 1]
-        self.action_space = gym.spaces.Box(
-            low=self.config.action_space_low,
-            high=self.config.action_space_high,
-            shape=(1,),
-            dtype=np.float32
-        )
-        
-        # Observation space: 74-dim state + 3-dim action mask + 1-dim kelly
+        # Define action space: continuous Box(-1,1) by default, or Discrete(N)
+        # when action_space_type == "discrete" (PPO discrete experiment).
+        if self.config.action_space_type == "discrete":
+            self.action_space = gym.spaces.Discrete(self.config.discrete_action_bins)
+            mask_shape = (self.config.discrete_action_bins,)
+        else:
+            self.action_space = gym.spaces.Box(
+                low=self.config.action_space_low,
+                high=self.config.action_space_high,
+                shape=(1,),
+                dtype=np.float32
+            )
+            mask_shape = (3,)
+
+        # Observation space: 74-dim state + N-dim action mask + 1-dim kelly.
+        # The mask shape tracks the action space size.
         self.observation_space = gym.spaces.Dict({
             'state': gym.spaces.Box(-np.inf, np.inf, (74,), dtype=np.float32),
-            'action_mask': gym.spaces.Box(0, 1, (3,), dtype=np.int8),
+            'action_mask': gym.spaces.Box(0, 1, mask_shape, dtype=np.int8),
             'kelly_leverage': gym.spaces.Box(0, 5, (1,), dtype=np.float32)
         })
         
@@ -759,21 +786,34 @@ class ParabolicReversalEnv(gym.Env):
         self.prev_capital = self.current_capital
         prev_position = self.current_position
 
-        # Validate action shape
-        action = np.clip(action, self.config.action_space_low, self.config.action_space_high)
-        desired_exposure_fraction = float(action[0])
-        
-        # CANONICAL ACTION CONVENTION (must match agent.py):
-        #   action < -0.05: INCREASE short exposure (Entry/Add)
-        #   action > 0.05:  DECREASE short exposure (Cover)
-        #   else:           HOLD current exposure  [-0.05, 0.05]
-        # Asymmetric thresholds break HOLD attractor; zero-mean Gaussian → COVER
-        assert -1.0 <= desired_exposure_fraction <= 1.0, \
-            f"Action {desired_exposure_fraction} out of bounds [-1, 1]"
-        
+        # Discrete vs continuous action handling. Discrete actions skip the
+        # continuous-clip + _discretize_action pipeline entirely; they're
+        # decoded directly into (action_type, desired_exposure_fraction) by
+        # _apply_discrete_action. Continuous path is unchanged.
+        discrete_action_index = None  # Set for discrete; used by mask check below.
+        if self.config.action_space_type == "discrete":
+            action_int = int(action) if not hasattr(action, "__len__") else int(action[0])
+            discrete_action_index = action_int
+            action_type, desired_exposure_fraction = self._apply_discrete_action(action_int)
+            assert -1.0 <= desired_exposure_fraction <= 1.0, \
+                f"Discrete action {action_int} produced out-of-range magnitude {desired_exposure_fraction}"
+        else:
+            # Validate action shape
+            action = np.clip(action, self.config.action_space_low, self.config.action_space_high)
+            desired_exposure_fraction = float(action[0])
+
+            # CANONICAL ACTION CONVENTION (must match agent.py):
+            #   action < -0.05: INCREASE short exposure (Entry/Add)
+            #   action > 0.05:  DECREASE short exposure (Cover)
+            #   else:           HOLD current exposure  [-0.05, 0.05]
+            # Asymmetric thresholds break HOLD attractor; zero-mean Gaussian → COVER
+            assert -1.0 <= desired_exposure_fraction <= 1.0, \
+                f"Action {desired_exposure_fraction} out of bounds [-1, 1]"
+            action_type = None  # decided below after circuit-breaker
+
         # Get current action mask BEFORE we move
         action_mask = self._compute_action_mask()
-        
+
         # === CIRCUIT BREAKER CHECK ===
 # === CIRCUIT BREAKER CHECK ===
         if self.circuit_breaker_triggered:
@@ -785,15 +825,23 @@ class ParabolicReversalEnv(gym.Env):
             observation = self._get_observation()
             info = self._get_info()
             return observation, reward, True, False, info
-        
+
         # === A. PROCESS ACTION at time t ===
-        # Determine action type from continuous value
-        action_type = self._discretize_action(desired_exposure_fraction)
+        # Determine action type. For continuous, run the discretizer now.
+        # For discrete it was decoded above by _apply_discrete_action.
+        if self.config.action_space_type != "discrete":
+            action_type = self._discretize_action(desired_exposure_fraction)
         
         # Neural masking (Change 10) should prevent invalid actions before they reach the env.
         # RLlib legacy API samples from the distribution externally, so soft violations are
         # possible early in training. Track and clamp rather than crash.
-        if action_mask[action_type] == 0:
+        # For discrete actions the mask is N-element and indexed by the discrete
+        # action; for continuous the 3-element mask is indexed by action_type.
+        if self.config.action_space_type == "discrete":
+            mask_check_index = discrete_action_index
+        else:
+            mask_check_index = action_type
+        if action_mask[mask_check_index] == 0:
             self._mask_violation_count = getattr(self, "_mask_violation_count", 0) + 1
 
             # Classify: expected (VWAP too low or outside window) vs suspicious
@@ -1281,6 +1329,40 @@ class ParabolicReversalEnv(gym.Env):
         else:
             return 2  # Action 2: Hold
 
+    def _apply_discrete_action(self, action_int: int) -> tuple:
+        """Decode a Discrete(7) action into (action_type, desired_exposure_fraction).
+
+        Returns the same (action_type, magnitude) tuple that the continuous
+        path produces after _discretize_action; downstream step() code consumes
+        them identically.
+
+        Bin layout (for discrete_action_bins == 7):
+            0: HOLD                            -> (action_type=2, magnitude=0.0)
+            1: ENTRY exposure_fraction=-0.25   -> (0, -0.25)
+            2: ENTRY exposure_fraction=-0.50   -> (0, -0.50)
+            3: ENTRY exposure_fraction=-1.00   -> (0, -1.00)
+            4: COVER 25% of current position   -> (1, +0.25)
+            5: COVER 50%                       -> (1, +0.50)
+            6: COVER 100% (full exit)          -> (1, +1.00)
+
+        Designed for PPO with a categorical policy head — no Gaussian noise,
+        no policy.compute -> discretize round-trip. See
+        docs/ppo_continuous_smoke_2026-05-19.md for the prior result that
+        motivated keeping this purely as an additive experiment.
+        """
+        action_int = int(action_int)
+        if action_int == 0:
+            return (2, 0.0)  # HOLD
+        if action_int in (1, 2, 3):
+            mags = {1: -0.25, 2: -0.50, 3: -1.00}
+            return (0, mags[action_int])  # ENTRY
+        if action_int in (4, 5, 6):
+            mags = {4: 0.25, 5: 0.50, 6: 1.00}
+            return (1, mags[action_int])  # COVER
+        raise ValueError(
+            f"Discrete action {action_int} out of range [0, {self.config.discrete_action_bins - 1}]"
+        )
+
     def _compute_cover_target(self, desired_exposure_fraction: float) -> float:
         """Class-method wrapper around scale_out_cover_target.
 
@@ -1291,9 +1373,20 @@ class ParabolicReversalEnv(gym.Env):
         return scale_out_cover_target(self.current_position_value, desired_exposure_fraction)
 
     def _compute_action_mask(self) -> np.ndarray:
-        """Compute the boolean action mask."""
+        """Compute the boolean action mask.
+
+        Shape depends on action_space_type:
+            "continuous": (3,) — [ENTRY, COVER, HOLD]
+            "discrete":   (N,) where N == discrete_action_bins
+                          (default 7). The 3 conceptual gates (ENTRY/COVER/HOLD)
+                          are projected onto bins: HOLD -> bin 0,
+                          ENTRY -> bins 1..3, COVER -> bins 4..6.
+        """
+        if self.config.action_space_type == "discrete":
+            return self._compute_discrete_action_mask()
+
         mask = np.ones(3, dtype=np.int8)
-        
+
         # Circuit breaker - only allow closing
         if self.circuit_breaker_triggered:
             mask[0] = 0
@@ -1301,28 +1394,78 @@ class ParabolicReversalEnv(gym.Env):
             if self.current_position == 0:
                 mask[1] = 0
             return mask
-        
+
         # Time-based restrictions
         if not self.in_entry_window:
             mask[0] = 0  # No new entries outside window
-        
+
         if self.must_flatten:
             mask[0] = 0
             mask[2] = 0 if self.current_position != 0 else 1
-        
+
         # VWAP deviation threshold: must exceed entry threshold
         if self.vwap_deviation < self.config.min_vwap_deviation_entry:
             mask[0] = 0  # No entries below threshold
-        
+
         # Position-based logic
         if self.current_position == 0:
             mask[1] = 0  # Can't decrease if flat
-        
+
         # Maximum position value constraint
         current_exposure = abs(self.current_position_value)
         if current_exposure >= self.config.max_position_value:
             mask[0] = 0  # Block increasing beyond max
-        
+
+        return mask
+
+    def _compute_discrete_action_mask(self) -> np.ndarray:
+        """Discrete(N) action mask. Project the 3 conceptual gates onto bins.
+
+        Bin layout (for discrete_action_bins == 7):
+            0 = HOLD, 1..3 = ENTRY (3 magnitudes), 4..6 = COVER (3 magnitudes).
+        Each conceptual gate (entry_ok / cover_ok / hold_ok) toggles its
+        corresponding contiguous bin range.
+        """
+        n_bins = self.config.discrete_action_bins
+        mask = np.ones(n_bins, dtype=np.int8)
+
+        # Compute the 3 conceptual gates with the same logic as the continuous mask
+        entry_ok = 1
+        cover_ok = 1
+        hold_ok = 1
+
+        if self.circuit_breaker_triggered:
+            entry_ok = 0
+            hold_ok = 0
+            if self.current_position == 0:
+                cover_ok = 0
+        else:
+            if not self.in_entry_window:
+                entry_ok = 0
+
+            if self.must_flatten:
+                entry_ok = 0
+                hold_ok = 0 if self.current_position != 0 else 1
+
+            if self.vwap_deviation < self.config.min_vwap_deviation_entry:
+                entry_ok = 0
+
+            if self.current_position == 0:
+                cover_ok = 0
+
+            current_exposure = abs(self.current_position_value)
+            if current_exposure >= self.config.max_position_value:
+                entry_ok = 0
+
+        # Project onto bins
+        # bin 0: HOLD
+        mask[0] = int(hold_ok)
+        # bins 1..3: ENTRY (assumes 7-bin layout; generalize if discrete_action_bins changes)
+        if n_bins >= 4:
+            mask[1:4] = int(entry_ok)
+        # bins 4..6: COVER
+        if n_bins >= 7:
+            mask[4:7] = int(cover_ok)
         return mask
     
     def _calculate_kelly_constrained_leverage(self) -> float:
