@@ -459,7 +459,7 @@ class ParabolicReversalEnv(gym.Env):
         # populated when ``action_space_type == "discrete"`` — for the
         # continuous action space it stays at all-zero (int(action) on a
         # Box sample is meaningless, so we deliberately skip it). The
-        # diagnostics flow into ``get_episode_info()`` and are consumed
+        # diagnostics flow into ``get_episode_diagnostics()`` and are consumed
         # by the trainer (Phase 1.2) and the bin-count sweep (Phase 4).
         self._action_histogram = {
             i: 0 for i in range(self.config.discrete_action_bins)
@@ -806,6 +806,22 @@ class ParabolicReversalEnv(gym.Env):
         4. Check termination
         5. Return observation
         """
+        # Phase 1.1 fix (C1): episode_step_count must increment for EVERY
+        # step() invocation — including those that short-circuit on the
+        # already-triggered circuit-breaker branch below. Bumping it here,
+        # before any early-return path, preserves the invariant
+        #   sum(action_histogram.values()) == episode_step_count
+        # required by tests/test_action_diagnostics.py. The histogram bump
+        # below (inside the discrete-action handler) also runs before the
+        # circuit-breaker short-circuit, so the two counters stay aligned.
+        self.episode_step_count += 1
+
+        # Reset the per-step "did _close_position run?" flag. Used in the
+        # reward block to gate the regular-cover trade increment so it
+        # doesn't double-count when _close_position fired earlier in the
+        # step (intra-step stop, post-advance circuit-breaker flatten).
+        self._position_closed_this_step = False
+
         # Store previous equity and position for reward calculation
         self.prev_capital = self.current_capital
         prev_position = self.current_position
@@ -1062,9 +1078,9 @@ class ParabolicReversalEnv(gym.Env):
         
         # === C. CALCULATE COMPOSITE REWARD using NEW price P_{t+1} ===
         self.global_timestep += 1
-        # Phase 1.1: per-episode step counter (matches sum over histogram
-        # for the discrete case — see test_action_diagnostics.py).
-        self.episode_step_count += 1
+        # NOTE: episode_step_count is bumped at the TOP of step() so the
+        # histogram-vs-step-count invariant survives the circuit-breaker
+        # short-circuit branch (see Phase 1.1 fix C1).
 
         # Update trade lifecycle tracking BEFORE computing shaping bonuses
         self._just_entered = (prev_position == 0.0 and self.current_position < 0.0)
@@ -1081,16 +1097,15 @@ class ParabolicReversalEnv(gym.Env):
             self.bars_since_last_trade += 1
 
         # Phase 1.1: time-in-position counter. Counts every step the env
-        # is in a non-flat position; on the close-bar (position back to
-        # 0 from non-zero), flushes the accumulated count into the
-        # per-trade list. ``self.current_position != 0`` covers shorts
-        # (negative) since longs are forbidden by the strategy.
+        # is in a non-flat position. The FLUSH (append-and-reset) is now
+        # performed inside ``_close_position()`` so it fires on every
+        # close path — including the circuit-breaker short-circuit, the
+        # intra-step stop, and the active-circuit-breaker flatten — not
+        # just the regular cover that returns through this branch.
+        # ``self.current_position != 0`` covers shorts (negative) since
+        # longs are forbidden by the strategy.
         if self.current_position != 0:
             self._current_position_bars += 1
-        else:
-            if self._current_position_bars > 0:
-                self._bars_in_position_per_trade.append(self._current_position_bars)
-                self._current_position_bars = 0
 
         base_reward = self._calculate_true_reward()
         drawdown_penalty = self._compute_drawdown_penalty()
@@ -1107,14 +1122,20 @@ class ParabolicReversalEnv(gym.Env):
         completion_bonus = 0.0
         r_multiple_term = 0.0  # A4: per-trade R-multiple reward (default weight 0 = no-op)
         if prev_position < 0 and self.current_position == 0:
-            # Phase 1.1: round-trip complete. Bumped here (not in
-            # _record_trade) because _record_trade is only called when the
-            # cover path fully closes — but a position can also close via
-            # _close_position (circuit breaker, intra-step stop, bankruptcy,
-            # episode-end flatten), and this hook covers all of them.
-            # Partial scale-outs leave current_position non-zero, so they
-            # don't trigger this branch.
-            self._n_trades += 1
+            # Phase 1.1 fix (C2): _n_trades is incremented inside
+            # _close_position() for the non-regular close paths
+            # (circuit-breaker, intra-step stop, EOD/bankruptcy flatten).
+            # The regular discrete-COVER path zeros position via
+            # _execute_position_change WITHOUT calling _close_position,
+            # so we bump here for that case — gated by the
+            # _position_closed_this_step flag to avoid double-counting.
+            # We also flush the time-in-position counter here, mirroring
+            # the same logic in _close_position().
+            if not self._position_closed_this_step:
+                if self._current_position_bars > 0:
+                    self._bars_in_position_per_trade.append(self._current_position_bars)
+                    self._current_position_bars = 0
+                self._n_trades += 1
             trade_pnl = getattr(self, '_last_trade_pnl', 0.0)
             completion_bonus = self._compute_trade_completion_bonus(
                 trade_pnl=trade_pnl,
@@ -1964,13 +1985,38 @@ class ParabolicReversalEnv(gym.Env):
         self.rolling_kelly_fraction = self._calculate_kelly_constrained_leverage()
     
     def _close_position(self):
-        """Close current position."""
-        if self.current_position != 0:
+        """Close current position.
+
+        Phase 1.1 fix (C1+C2+M3): this method is the single funnel for the
+        non-regular close paths — the intra-step stop, the
+        active-circuit-breaker flatten, the EOD flatten, and the
+        bankruptcy/equity-zero path. The regular discrete-COVER goes
+        through ``_execute_position_change`` directly and does NOT call
+        this method. We update the diagnostic counters here so they fire
+        for all the non-regular paths, and the step() reward block
+        handles the regular-cover case (guarded against double-counting
+        via ``_position_closed_this_step``).
+        """
+        was_open = self.current_position != 0
+        if was_open:
             self._execute_position_change(0.0)
         self.current_position = 0.0
         self.current_position_value = 0.0
         self.entry_price = 0.0
         self.unrealized_pnl = 0.0
+
+        # Diagnostic counters fire on every non-regular close path. The
+        # ``was_open`` guard ensures a no-op call (already flat) doesn't
+        # bump the trade count or push a stale bars-in-position sample.
+        # ``_position_closed_this_step`` tells the step() reward block to
+        # skip its own increment (avoids double-counting when both this
+        # method AND the reward block see ``current_position == 0``).
+        if was_open:
+            if self._current_position_bars > 0:
+                self._bars_in_position_per_trade.append(self._current_position_bars)
+                self._current_position_bars = 0
+            self._n_trades += 1
+            self._position_closed_this_step = True
     
     def _estimate_potential_loss(self, target_value: float) -> float:
         """Estimate potential loss from position change.
@@ -2062,14 +2108,20 @@ class ParabolicReversalEnv(gym.Env):
             'suspicious_violations': getattr(self, '_suspicious_violations', 0),
         }
 
-    def get_episode_info(self) -> Dict:
-        """Return action-distribution + time-in-position diagnostics.
+    def get_episode_diagnostics(self) -> Dict:
+        """Return action-distribution + time-in-position DIAGNOSTIC summary.
+
+        This is distinct from Gym's per-step ``info`` dict returned by
+        ``step()`` — it's an end-of-episode summary intended for
+        logging/dashboards, not a per-step signal. Renamed from
+        ``get_episode_info`` (Phase 1.1 fix I1) to avoid the name
+        collision with the Gym ``info`` semantic.
 
         Phase 1.1: surfaces the per-episode counters maintained inside
-        ``step()``. Consumed by the trainer (Phase 1.2) to log the
-        aggregate action distribution per training iteration, and by
-        the bin-count sweep (Phase 4) to detect policy collapse via
-        action-distribution entropy.
+        ``step()`` and ``_close_position()``. Consumed by the trainer
+        (Phase 1.2) to log the aggregate action distribution per training
+        iteration, and by the bin-count sweep (Phase 4) to detect policy
+        collapse via action-distribution entropy.
 
         For the continuous action space ``_action_histogram`` is
         all-zero (the int(Box-sample) projection isn't meaningful), so

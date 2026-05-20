@@ -483,7 +483,8 @@ class QuickWFOTrainer:
                 preprocessor = None
 
         # Phase 1.2: collect OOS action distribution + time-in-position
-        # diagnostics from get_episode_info() (added in Phase 1.1, env.py).
+        # diagnostics from get_episode_diagnostics() (added in Phase 1.1,
+        # env.py; renamed from get_episode_info in Phase 1.1 fix I1).
         # The histogram is only populated for discrete action spaces; for
         # continuous it's all zeros (the int-cast of a Box(-1,1) sample isn't
         # a meaningful bin index). We still collect it uniformly here and
@@ -514,7 +515,7 @@ class QuickWFOTrainer:
                     obs, reward, done, truncated, info = eval_env.step(action)
                     step_count += 1
 
-                ep_info = eval_env.get_episode_info()
+                ep_info = eval_env.get_episode_diagnostics()
                 episode_results.append({
                     'symbol': setup['symbol'],
                     'date': setup['date'],
@@ -536,7 +537,7 @@ class QuickWFOTrainer:
 
         # Phase 1.2: aggregate OOS action distribution across all eval
         # episodes in this fold. For continuous action spaces the histograms
-        # are all zeros (see env.get_episode_info docstring); we set
+        # are all zeros (see env.get_episode_diagnostics docstring); we set
         # action_distribution to None and document via a top-level note so
         # downstream consumers don't mistake all-zeros for a degenerate
         # distribution. The discrete-bins count is sourced from the
