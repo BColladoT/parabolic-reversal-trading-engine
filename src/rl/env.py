@@ -453,6 +453,21 @@ class ParabolicReversalEnv(gym.Env):
         self.episode_trades = 0
         self.episode_wins = 0
         self.daily_returns: deque = deque(maxlen=self.config.sortino_lookback)
+
+        # Phase 1.1: action-distribution + time-in-position diagnostics.
+        # ``_action_histogram`` is keyed by discrete bin index and only
+        # populated when ``action_space_type == "discrete"`` — for the
+        # continuous action space it stays at all-zero (int(action) on a
+        # Box sample is meaningless, so we deliberately skip it). The
+        # diagnostics flow into ``get_episode_info()`` and are consumed
+        # by the trainer (Phase 1.2) and the bin-count sweep (Phase 4).
+        self._action_histogram = {
+            i: 0 for i in range(self.config.discrete_action_bins)
+        }
+        self._bars_in_position_per_trade: List[int] = []
+        self._current_position_bars = 0
+        self._n_trades = 0
+        self.episode_step_count = 0
         
         # 60-bar history buffer for TCN-AE encoding
         self.price_history: deque = deque(maxlen=60)
@@ -668,6 +683,15 @@ class ParabolicReversalEnv(gym.Env):
         self.price_history.clear()
         self.trade_history.clear()
 
+        # Phase 1.1: clear action-diagnostic counters for the new episode.
+        self._action_histogram = {
+            i: 0 for i in range(self.config.discrete_action_bins)
+        }
+        self._bars_in_position_per_trade = []
+        self._current_position_bars = 0
+        self._n_trades = 0
+        self.episode_step_count = 0
+
         # Reset violation classification counters
         self._expected_violations = 0
         self._suspicious_violations = 0
@@ -794,6 +818,15 @@ class ParabolicReversalEnv(gym.Env):
         if self.config.action_space_type == "discrete":
             action_int = int(action) if not hasattr(action, "__len__") else int(action[0])
             discrete_action_index = action_int
+            # Phase 1.1: record the agent's raw bin choice BEFORE the mask
+            # may override action_type to HOLD. We want to see what the
+            # policy is actually sampling, not what the mask collapses it
+            # to. (Continuous path skips this — int(Box-sample) is
+            # meaningless for histogramming.)
+            if 0 <= action_int < self.config.discrete_action_bins:
+                self._action_histogram[action_int] = (
+                    self._action_histogram.get(action_int, 0) + 1
+                )
             action_type, desired_exposure_fraction = self._apply_discrete_action(action_int)
             assert -1.0 <= desired_exposure_fraction <= 1.0, \
                 f"Discrete action {action_int} produced out-of-range magnitude {desired_exposure_fraction}"
@@ -1029,6 +1062,9 @@ class ParabolicReversalEnv(gym.Env):
         
         # === C. CALCULATE COMPOSITE REWARD using NEW price P_{t+1} ===
         self.global_timestep += 1
+        # Phase 1.1: per-episode step counter (matches sum over histogram
+        # for the discrete case — see test_action_diagnostics.py).
+        self.episode_step_count += 1
 
         # Update trade lifecycle tracking BEFORE computing shaping bonuses
         self._just_entered = (prev_position == 0.0 and self.current_position < 0.0)
@@ -1043,6 +1079,18 @@ class ParabolicReversalEnv(gym.Env):
         else:
             self.bars_in_trade = 0
             self.bars_since_last_trade += 1
+
+        # Phase 1.1: time-in-position counter. Counts every step the env
+        # is in a non-flat position; on the close-bar (position back to
+        # 0 from non-zero), flushes the accumulated count into the
+        # per-trade list. ``self.current_position != 0`` covers shorts
+        # (negative) since longs are forbidden by the strategy.
+        if self.current_position != 0:
+            self._current_position_bars += 1
+        else:
+            if self._current_position_bars > 0:
+                self._bars_in_position_per_trade.append(self._current_position_bars)
+                self._current_position_bars = 0
 
         base_reward = self._calculate_true_reward()
         drawdown_penalty = self._compute_drawdown_penalty()
@@ -1059,6 +1107,14 @@ class ParabolicReversalEnv(gym.Env):
         completion_bonus = 0.0
         r_multiple_term = 0.0  # A4: per-trade R-multiple reward (default weight 0 = no-op)
         if prev_position < 0 and self.current_position == 0:
+            # Phase 1.1: round-trip complete. Bumped here (not in
+            # _record_trade) because _record_trade is only called when the
+            # cover path fully closes — but a position can also close via
+            # _close_position (circuit breaker, intra-step stop, bankruptcy,
+            # episode-end flatten), and this hook covers all of them.
+            # Partial scale-outs leave current_position non-zero, so they
+            # don't trigger this branch.
+            self._n_trades += 1
             trade_pnl = getattr(self, '_last_trade_pnl', 0.0)
             completion_bonus = self._compute_trade_completion_bonus(
                 trade_pnl=trade_pnl,
@@ -2004,6 +2060,41 @@ class ParabolicReversalEnv(gym.Env):
             'episode_source': getattr(self, '_episode_source', 'unknown'),
             'expected_violations': getattr(self, '_expected_violations', 0),
             'suspicious_violations': getattr(self, '_suspicious_violations', 0),
+        }
+
+    def get_episode_info(self) -> Dict:
+        """Return action-distribution + time-in-position diagnostics.
+
+        Phase 1.1: surfaces the per-episode counters maintained inside
+        ``step()``. Consumed by the trainer (Phase 1.2) to log the
+        aggregate action distribution per training iteration, and by
+        the bin-count sweep (Phase 4) to detect policy collapse via
+        action-distribution entropy.
+
+        For the continuous action space ``_action_histogram`` is
+        all-zero (the int(Box-sample) projection isn't meaningful), so
+        callers should gate consumption on ``action_space_type``.
+
+        Returns:
+            dict with keys:
+                action_histogram: {bin_idx: count} for every bin
+                mean_bars_in_position: mean over completed round-trips
+                median_bars_in_position: median over completed round-trips
+                n_trades: number of completed round-trips this episode
+                n_bars: total steps taken this episode
+        """
+        return {
+            "action_histogram": dict(self._action_histogram),
+            "mean_bars_in_position": (
+                float(np.mean(self._bars_in_position_per_trade))
+                if self._bars_in_position_per_trade else 0.0
+            ),
+            "median_bars_in_position": (
+                float(np.median(self._bars_in_position_per_trade))
+                if self._bars_in_position_per_trade else 0.0
+            ),
+            "n_trades": self._n_trades,
+            "n_bars": self.episode_step_count,
         }
     
     def render(self):
