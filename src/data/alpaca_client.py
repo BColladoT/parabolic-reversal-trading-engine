@@ -16,6 +16,8 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderType
 from alpaca.data.live.stock import StockDataStream
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockSnapshotRequest
 
 from src.utils.config import CONFIG
 from src.utils.logger import logger
@@ -49,6 +51,13 @@ class AlpacaClient:
             api_key=self.api_key,
             secret_key=self.secret_key,
             paper=self.paper
+        )
+
+        # Historical-data REST client (for the dynamic scanner — full market
+        # snapshots in batches; bypasses the WS IEX 30-symbol cap).
+        self.data_client = StockHistoricalDataClient(
+            api_key=self.api_key,
+            secret_key=self.secret_key,
         )
         
         # WebSocket
@@ -134,6 +143,59 @@ class AlpacaClient:
             logger.error(f"Failed to get account: {e}")
             return {}
     
+    def get_snapshots(self, symbols, batch_size: int = 500) -> Dict[str, dict]:
+        """Fetch multi-symbol snapshots from Alpaca historical data API.
+
+        The snapshot endpoint returns the latest trade, latest quote, latest
+        minute bar, latest daily bar, and previous daily bar for each symbol
+        in one call. Used by the DynamicScanner to screen the full
+        micro-cap universe (~3,500 symbols) without hitting the WS streaming
+        cap (~30 symbols on IEX free tier).
+
+        Returns a dict ``{symbol: {latest_trade, latest_quote, daily_bar,
+        prev_daily_bar, minute_bar}}`` with primitives extracted from the
+        Alpaca SDK objects. Failures are logged but don't raise — partial
+        results are returned for whatever batches succeeded.
+
+        Args:
+            symbols: iterable of symbol strings.
+            batch_size: max symbols per request (Alpaca recommends <= 1000).
+        """
+        symbols = list(symbols)
+        out: Dict[str, dict] = {}
+        if not symbols:
+            return out
+        for i in range(0, len(symbols), batch_size):
+            chunk = symbols[i:i + batch_size]
+            try:
+                req = StockSnapshotRequest(symbol_or_symbols=chunk)
+                snaps = self.data_client.get_stock_snapshot(req)
+                for sym, snap in snaps.items():
+                    daily = getattr(snap, "daily_bar", None)
+                    prev_daily = getattr(snap, "previous_daily_bar", None)
+                    latest_trade = getattr(snap, "latest_trade", None)
+                    latest_quote = getattr(snap, "latest_quote", None)
+                    minute_bar = getattr(snap, "minute_bar", None)
+                    out[sym] = {
+                        "daily_bar": {
+                            "open": getattr(daily, "open", None),
+                            "high": getattr(daily, "high", None),
+                            "low": getattr(daily, "low", None),
+                            "close": getattr(daily, "close", None),
+                            "volume": getattr(daily, "volume", None),
+                        } if daily else None,
+                        "previous_daily_bar": {
+                            "close": getattr(prev_daily, "close", None),
+                        } if prev_daily else None,
+                        "latest_trade_price": getattr(latest_trade, "price", None),
+                        "latest_quote_ask": getattr(latest_quote, "ask_price", None),
+                        "latest_quote_bid": getattr(latest_quote, "bid_price", None),
+                        "minute_bar_close": getattr(minute_bar, "close", None),
+                    }
+            except Exception as e:
+                logger.error(f"get_snapshots batch {i}-{i+len(chunk)} failed: {e}")
+        return out
+
     def check_asset_shortable(self, symbol: str) -> Dict:
         """
         Check if an asset is shortable and easy to borrow.
@@ -354,6 +416,53 @@ class AlpacaClient:
             logger.error(f"WebSocket connection failed: {e}")
             return False
     
+    async def _ws_unsubscribe(self, symbols: Set[str]):
+        """Unsubscribe from streaming data for the given symbols.
+
+        Alpaca v2 streaming protocol supports symmetric unsubscribe via the
+        same channel layout as subscribe. Used by update_subscriptions() to
+        rotate the active symbol set as the DynamicScanner finds new top
+        candidates and drops stale ones — keeps the IEX free-tier slot
+        budget (~30 channel-subscriptions) usable.
+        """
+        if not symbols or not self.ws:
+            return
+        symbol_list = list(symbols)
+        unsubscribe_msg = {
+            "action": "unsubscribe",
+            "trades": symbol_list,
+            "quotes": symbol_list,
+            "bars": symbol_list,
+        }
+        try:
+            await self.ws.send(json.dumps(unsubscribe_msg))
+            logger.info(f"Unsubscribed from: {symbol_list}")
+        except Exception as e:
+            logger.error(f"Unsubscribe error: {e}")
+
+    def update_subscriptions(self, target: Set[str]):
+        """Diff current subscriptions vs ``target`` and send adds/removes.
+
+        Called by the engine's dynamic-scanner tick to rotate streaming
+        symbols. Thread-safe (uses run_coroutine_threadsafe via the
+        WS-thread event loop). No-op if the WS is not connected yet.
+        """
+        target = {s.upper() for s in target}
+        to_add = target - self.subscribed_symbols
+        to_remove = self.subscribed_symbols - target
+        if not to_add and not to_remove:
+            return
+        self.subscribed_symbols = set(target)
+        if self.ws is None or not self._is_ws_open():
+            # Not connected yet; the next reconnect cycle will pick up the
+            # updated subscribed_symbols set automatically (see _ws_handler).
+            logger.info(f"WS not open; subscriptions deferred (+{len(to_add)} / -{len(to_remove)})")
+            return
+        if to_remove:
+            self._schedule_on_ws_loop(self._ws_unsubscribe(to_remove))
+        if to_add:
+            self._schedule_on_ws_loop(self._ws_subscribe(to_add))
+
     async def _ws_subscribe(self, symbols: Set[str]):
         """Subscribe to real-time data streams.
 

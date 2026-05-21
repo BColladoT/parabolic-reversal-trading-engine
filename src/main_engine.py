@@ -44,6 +44,11 @@ class TradingEngine:
         self.screener = ParabolicScreener(self.alpaca)
         self.risk_manager = RiskManager(self.alpaca)
         self.signal_engine = ParabolicSignalEngine(self.data_engine)
+        # Dynamic universe scanner — rotates WS subscriptions to today's
+        # top parabolic candidates across the ~3,500-symbol micro-cap
+        # universe (replaces the static 10-symbol watchlist).
+        from src.screening.dynamic_scanner import DynamicScanner
+        self.scanner = DynamicScanner(self.alpaca)
         
         # State
         self.running = False
@@ -360,12 +365,15 @@ class TradingEngine:
         return now_et.time() >= flatten_time
     
     def _load_watchlist(self) -> Set[str]:
-        """Read `config/watchlist.txt` (one symbol per line, # comments).
+        """Seed the WS subscription set at startup.
 
-        Returns an empty set if the file is missing — caller handles the
-        consequence (empty WebSocket subscription → no ticks → stale-feed
-        alerts). For paper trading, the file is generated from the most
-        recent backtest winners; see docs/paper_trade_ready_2026-05-21.md.
+        The DynamicScanner takes over after the first scan tick (~60s into
+        the main loop). This file-loaded seed is a fallback only: it
+        guarantees the engine has SOMETHING subscribed before the scanner
+        runs, in case the scanner returns 0 candidates on cold start
+        (e.g., pre-market, or no qualifying gainers at startup).
+
+        Reads `config/watchlist.txt` (one symbol per line, # comments).
         """
         from pathlib import Path
         p = Path("config/watchlist.txt")
@@ -378,23 +386,38 @@ class TradingEngine:
             if not s or s.startswith("#"):
                 continue
             symbols.add(s.upper())
-        logger.info(f"loaded watchlist: {len(symbols)} symbols from {p}")
+        logger.info(f"loaded watchlist (seed): {len(symbols)} symbols from {p}")
         return symbols
 
     def _scan_for_setups(self):
-        """Scan for new trading setups.
+        """Run the DynamicScanner and rotate WS subscriptions to the top
+        parabolic candidates across the full micro-cap universe.
 
-        Currently a stub. The engine subscribes to its full watchlist at
-        startup; the signal engine filters the live tick stream for the
-        parabolic-reversal pattern (volume exhaustion + VWAP > 120% + 2+
-        confirming factors). When the live scanner is wired in, this hook
-        can dynamically add/remove symbols via self.alpaca.subscribe_symbols.
+        Called every ~60s from the main loop. The scanner does a REST
+        snapshot of ~3,500 symbols (~3-5s), applies the screening filters
+        from config/settings.yaml, ranks survivors by setup-quality, and
+        returns the top N. We diff against the current subscription set and
+        send add/remove via update_subscriptions(), staying under the IEX
+        free-tier cap (~10 symbols × 3 channels).
+
+        Outside the entry window (09:45–14:30 ET), the scanner is skipped
+        — we let the WS keep streaming what it has so already-open positions
+        continue to mark-to-market.
         """
         if not self._in_execution_window():
             return
-        # TODO: Integrate with real-time scanner API for dynamic universe.
-        # Current behavior: rely on the static watchlist loaded in __init__.
-        pass
+        try:
+            target = self.scanner.select_symbols(max_candidates=10)
+        except Exception as e:
+            logger.error(f"DynamicScanner failed: {e}")
+            return
+        if not target:
+            # No parabolic setups right now; keep current subscriptions
+            # rather than going silent. The engine still mark-to-markets
+            # any held positions on the existing stream.
+            return
+        self.subscribed_symbols = set(target)
+        self.alpaca.update_subscriptions(target)
     
     def run(self):
         """Main trading loop."""
