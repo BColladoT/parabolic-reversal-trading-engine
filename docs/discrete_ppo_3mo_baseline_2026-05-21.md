@@ -1,4 +1,20 @@
-# Discrete PPO is Profitable on the Expanded OOS Window (2026-05-21)
+# Discrete PPO on the Expanded OOS Window — Initial Result + Window-Generalization Test (2026-05-21)
+
+## ⚠️ POST-WRITE UPDATE: The Q4 result does NOT robustly generalize
+
+A follow-up run on Q3 2024 (2024-07-01 -> 09-30) produced:
+- Mean: **-$88** (std $405 across 3 seeds, vs Q4's $38)
+- Win rates: 28% / 26% / 14% (vs Q4's stable 40% across all 3)
+- Action distribution shifts: Q3 uses bin 1 (ENTRY-100%) at 93% vs Q4's bin 2 (ENTRY-50%) at 63%
+
+**Interpretation:** the Q4 +$1,958 is window-specific, not a robust "RL works" signal. The wide std on Q3 (3 seeds disagreeing by hundreds of dollars) suggests the policy learns different strategies depending on training-data drift. Currently running H1 2024 (Jan-Jun) as a third data point.
+
+Verdict (provisional, pending H1): **CONTINUE_RESEARCH** — RL is not yet trustworthy enough to ship. The Q4 result remains real but is a single-window artifact, not a generalization claim.
+
+See bottom of doc for the H1 result when it lands.
+
+---
+
 
 ## Headline
 
