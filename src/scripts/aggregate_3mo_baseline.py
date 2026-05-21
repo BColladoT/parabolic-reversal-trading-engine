@@ -26,13 +26,13 @@ def _read_seed(d: Path) -> dict | None:
     return {
         "seed": int(d.name.rsplit("s", 1)[-1]),
         "test_pnl": float(test_pnl),
-        "win_rate": fm.get("win_rate"),
-        "mean_episode_pnl": fm.get("mean_episode_pnl"),
+        "win_rate": fm.get("test_win_rate", fm.get("win_rate")),
+        "mean_episode_pnl": fm.get("test_pnl_mean", fm.get("mean_episode_pnl")),
         "n_episodes": fm.get("test_episodes_evaluated"),
         "test_start": fm.get("test_start"),
         "test_end": fm.get("test_end"),
         "per_episode_results": fm.get("per_episode_results", []),
-        "action_distribution": r.get("action_distribution"),
+        "action_distribution": fm.get("action_distribution") or r.get("action_distribution"),
     }
 
 
@@ -52,10 +52,12 @@ def main():
     n_eps = [s["n_episodes"] for s in per_seed if s["n_episodes"] is not None]
 
     print("=" * 60)
-    print("Discrete PPO 3-seed baseline on 2024-10-01 → 2024-12-30")
+    print("Discrete PPO 3-seed baseline on 2024-10-01 -> 2024-12-30")
     print("=" * 60)
     for s in sorted(per_seed, key=lambda x: x["seed"]):
-        print(f"  seed {s['seed']}: test_pnl=${s['test_pnl']:>8.0f}  win_rate={s['win_rate']:.3f}  n_episodes={s['n_episodes']}")
+        wr = s.get("win_rate")
+        wr_str = f"{wr:.3f}" if wr is not None else "n/a"
+        print(f"  seed {s['seed']}: test_pnl=${s['test_pnl']:>8.0f}  win_rate={wr_str}  n_episodes={s['n_episodes']}")
     print(f"\n  Mean:   ${mean_p:.0f}")
     print(f"  Median: ${median_p:.0f}")
     if std_p is not None:
@@ -78,7 +80,7 @@ def main():
             print(f"    bin {b}: {avg_dist[b]:.4f}")
         max_b, max_p = max(avg_dist.items(), key=lambda x: x[1])
         if max_p > 0.80:
-            print(f"  WARNING: bin {max_b} dominates ({max_p:.1%}) → likely policy collapse")
+            print(f"  WARNING: bin {max_b} dominates ({max_p:.1%}) -> likely policy collapse")
 
     # Build sweep_summary.json shape for analyze_final.py compatibility
     summary = {
