@@ -945,71 +945,114 @@ class QuickWFOTrainer:
         logger.info(f"Requested: train={self.config.train_months}mo + test={self.config.test_months}mo "
                      f"+ purge={self.config.purge_days}d = {months_per_fold:.1f} months/fold")
 
-        if total_months_needed > available_months:
-            max_train = int(available_months - self.config.test_months - purge_months)
-            max_test = int(available_months - self.config.train_months - purge_months)
-            logger.error(
-                f"ERROR: Need {total_months_needed:.0f} months but only "
-                f"{available_months:.0f} months of data available!\n"
-                f"  Options:\n"
-                f"    - Max train_months for {self.config.test_months}mo test: {max(0, max_train)}\n"
-                f"    - Max test_months for {self.config.train_months}mo train: {max(0, max_test)}\n"
-                f"  Reduce train_months or test_months and retry."
-            )
-            sys.exit(2)  # Exit code 2 = param validation failure (distinct from crash=1)
+        # 2026-05-20 OOS methodology fix: when an explicit test window was
+        # given via --test-start-date/--test-end-date, skip the auto-anchor
+        # and build a single fold over the requested window. main() has
+        # already validated that both flags are set together and parseable.
+        explicit_test_start = getattr(self.config, '_test_start_date', None)
+        explicit_test_end = getattr(self.config, '_test_end_date', None)
 
-        # Anchor the window: end at data_max, start as late as possible
-        # This ensures the test window uses the most recent data
-        end_date = data_max
-        start_date = end_date - timedelta(days=30 * total_months_needed)
-        start_date = max(start_date, data_min)
+        if explicit_test_start is not None and explicit_test_end is not None:
+            test_start = datetime.strptime(explicit_test_start, "%Y-%m-%d")
+            test_end = datetime.strptime(explicit_test_end, "%Y-%m-%d")
+            # Train window ends purge_days before test_start, and spans
+            # train_months back from there. Uses the same 30-day/month
+            # convention as the auto-computed path below.
+            purge_end = test_start
+            purge_start = purge_end - timedelta(days=self.config.purge_days)
+            train_end = purge_start
+            train_start = train_end - timedelta(days=30 * self.config.train_months)
+            train_start = max(train_start, data_min)
 
-        logger.info(f"Computed window: {start_date.date()} → {end_date.date()}")
-
-        splitter = WalkForwardSplitter(
-            start_date=start_date,
-            end_date=end_date,
-            train_years=0,  # We'll override with months
-            test_months=self.config.test_months,
-            purge_days=self.config.purge_days,
-            step_months=self.config.test_months
-        )
-
-        # Build fold splits from computed window
-        splits = []
-        current_start = start_date
-
-        for i in range(self.config.n_folds):
-            train_start = current_start
-            train_end = train_start + timedelta(days=30 * self.config.train_months)
-
-            purge_start = train_end
-            purge_end = purge_start + timedelta(days=self.config.purge_days)
-
-            test_start = purge_end
-            test_end = test_start + timedelta(days=30 * self.config.test_months)
-
-            if test_end > end_date:
+            if self.config.n_folds != 1:
                 logger.warning(
-                    f"Fold {i+1} test window ({test_start.date()} → {test_end.date()}) "
-                    f"exceeds data end ({end_date.date()}). Skipping."
+                    f"Explicit --test-start-date/--test-end-date forces n_folds=1 "
+                    f"(was {self.config.n_folds}). Walk-forward stepping is incompatible "
+                    f"with a user-pinned single window."
                 )
-                break
 
-            logger.info(f"  Fold {len(splits)+1}: Train {train_start.date()} → {train_end.date()} | "
-                         f"Test {test_start.date()} → {test_end.date()}")
+            logger.info(f"Explicit window: train {train_start.date()} → {train_end.date()} | "
+                         f"test {test_start.date()} → {test_end.date()}")
 
-            splits.append({
+            splits = [{
                 'train_start': train_start,
                 'train_end': train_end,
                 'purge_start': purge_start,
                 'purge_end': purge_end,
                 'test_start': test_start,
                 'test_end': test_end,
-                'fold': len(splits) + 1
-            })
+                'fold': 1,
+            }]
 
-            current_start += timedelta(days=30 * self.config.test_months)
+            # Skip the auto-computed branch below; jump to the post-splits flow.
+            start_date = train_start
+            end_date = test_end
+        else:
+            if total_months_needed > available_months:
+                max_train = int(available_months - self.config.test_months - purge_months)
+                max_test = int(available_months - self.config.train_months - purge_months)
+                logger.error(
+                    f"ERROR: Need {total_months_needed:.0f} months but only "
+                    f"{available_months:.0f} months of data available!\n"
+                    f"  Options:\n"
+                    f"    - Max train_months for {self.config.test_months}mo test: {max(0, max_train)}\n"
+                    f"    - Max test_months for {self.config.train_months}mo train: {max(0, max_test)}\n"
+                    f"  Reduce train_months or test_months and retry."
+                )
+                sys.exit(2)  # Exit code 2 = param validation failure (distinct from crash=1)
+
+            # Anchor the window: end at data_max, start as late as possible
+            # This ensures the test window uses the most recent data
+            end_date = data_max
+            start_date = end_date - timedelta(days=30 * total_months_needed)
+            start_date = max(start_date, data_min)
+
+            logger.info(f"Computed window: {start_date.date()} → {end_date.date()}")
+
+            splitter = WalkForwardSplitter(
+                start_date=start_date,
+                end_date=end_date,
+                train_years=0,  # We'll override with months
+                test_months=self.config.test_months,
+                purge_days=self.config.purge_days,
+                step_months=self.config.test_months
+            )
+
+            # Build fold splits from computed window
+            splits = []
+            current_start = start_date
+
+            for i in range(self.config.n_folds):
+                train_start = current_start
+                train_end = train_start + timedelta(days=30 * self.config.train_months)
+
+                purge_start = train_end
+                purge_end = purge_start + timedelta(days=self.config.purge_days)
+
+                test_start = purge_end
+                test_end = test_start + timedelta(days=30 * self.config.test_months)
+
+                if test_end > end_date:
+                    logger.warning(
+                        f"Fold {i+1} test window ({test_start.date()} → {test_end.date()}) "
+                        f"exceeds data end ({end_date.date()}). Skipping."
+                    )
+                    break
+
+                logger.info(f"  Fold {len(splits)+1}: Train {train_start.date()} → {train_end.date()} | "
+                             f"Test {test_start.date()} → {test_end.date()}")
+
+                splits.append({
+                    'train_start': train_start,
+                    'train_end': train_end,
+                    'purge_start': purge_start,
+                    'purge_end': purge_end,
+                    'test_start': test_start,
+                    'test_end': test_end,
+                    'fold': len(splits) + 1
+                })
+
+                current_start += timedelta(days=30 * self.config.test_months)
 
         if not splits:
             logger.error(
@@ -1208,6 +1251,20 @@ def main():
     parser.add_argument('--purge-days', type=int, default=5)
     parser.add_argument('--n-folds', type=int, default=1,
                         help='Number of walk-forward folds (default: 1)')
+    # Explicit OOS window override (additive — when unset, the auto-computed
+    # window from --train-months/--test-months/--purge-days is used). Added
+    # for the 2026-05-20 OOS methodology fix that widens the test window from
+    # ~14 setups (1 month) to 50+ (3 months) — see
+    # docs/oos_methodology_fix_2026-05-20.md. Both flags must be set together;
+    # passing only one raises an error.
+    parser.add_argument('--test-start-date', type=str, default=None,
+                        help='Explicit OOS start date YYYY-MM-DD. Overrides '
+                             'auto-computed window. Must be set together with '
+                             '--test-end-date. Forces n_folds=1.')
+    parser.add_argument('--test-end-date', type=str, default=None,
+                        help='Explicit OOS end date YYYY-MM-DD. Overrides '
+                             'auto-computed window. Must be set together with '
+                             '--test-start-date. Forces n_folds=1.')
     # SAC hyperparams
     parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--buffer-size', type=int, default=50000)
@@ -1313,6 +1370,28 @@ def main():
                      "(SAC's masked Gaussian model is built for Box actions). "
                      "Use --algo ppo for discrete experiments.")
 
+    # Explicit OOS window: both flags must be provided together. Passing only
+    # one is a user error (silently ignoring the half-set flag would mask
+    # bugs in sweep scripts).
+    if (args.test_start_date is None) != (args.test_end_date is None):
+        parser.error(
+            "--test-start-date and --test-end-date must be set together "
+            "(both or neither). Got "
+            f"test_start_date={args.test_start_date!r}, "
+            f"test_end_date={args.test_end_date!r}."
+        )
+    if args.test_start_date is not None:
+        try:
+            _ts = datetime.strptime(args.test_start_date, "%Y-%m-%d")
+            _te = datetime.strptime(args.test_end_date, "%Y-%m-%d")
+        except ValueError as e:
+            parser.error(f"--test-start-date/--test-end-date must be YYYY-MM-DD: {e}")
+        if _te <= _ts:
+            parser.error(
+                f"--test-end-date ({args.test_end_date}) must be after "
+                f"--test-start-date ({args.test_start_date})."
+            )
+
     # Reproducibility: seed every RNG that matters.
     import random as _stdlib_random
     torch.manual_seed(args.seed)
@@ -1373,6 +1452,12 @@ def main():
     config._ppo_train_batch_size = args.ppo_train_batch_size
     config._ppo_sgd_minibatch_size = args.ppo_sgd_minibatch_size
     config._ppo_num_sgd_iter = args.ppo_num_sgd_iter
+    # 2026-05-20 OOS methodology fix: explicit test-window override. When set,
+    # bypasses _detect_data_range anchoring and forces a single fold over the
+    # user-specified window. Validation already ensured both flags are set
+    # together and parseable above.
+    config._test_start_date = args.test_start_date
+    config._test_end_date = args.test_end_date
 
     trainer = QuickWFOTrainer(config)
     results = trainer.run()
