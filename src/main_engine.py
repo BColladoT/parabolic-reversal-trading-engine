@@ -48,8 +48,12 @@ class TradingEngine:
         # State
         self.running = False
         self.market_open = False
-        self.subscribed_symbols: Set[str] = set()
-        self.watch_symbols: Set[str] = set()
+        # Load curated watchlist from config/watchlist.txt; engine will subscribe
+        # to these symbols on startup. _scan_for_setups() is a stub for now —
+        # real-time scanner integration is future work. With an empty watchlist
+        # the WebSocket auths but no ticks flow ("stale feed" CRITICAL).
+        self.subscribed_symbols: Set[str] = self._load_watchlist()
+        self.watch_symbols: Set[str] = set(self.subscribed_symbols)
         
         # Self-healing
         self.error_count = 0
@@ -86,22 +90,29 @@ class TradingEngine:
         sys.exit(0)
     
     def _on_tick(self, tick: TickData):
-        """Process incoming tick data."""
+        """Process incoming tick data.
+
+        The data_engine aggregates ticks into bars (PolarsSignalEngine).
+        The signal_engine (ParabolicSignalEngine) works on aggregated bars
+        and exposes update_price_extremes() for tick-level high/low tracking,
+        but NOT a single update_tick() method (the prior code's reference
+        was a leftover from an older API). Bar-level signal evaluation
+        runs on bar-close inside data_engine, which fires the signal_engine's
+        registered callbacks.
+        """
         try:
-            # Update data engine
+            # Update data engine (bar aggregation + bar-close signal eval).
             self.data_engine.process_tick(tick)
-            
-            # Update signal engine
-            self.signal_engine.update_tick(
-                tick.symbol, tick.price, tick.size, tick.timestamp
-            )
-            
-            # Update risk manager
+
+            # Track day high/low on the signal engine per-tick.
+            self.signal_engine.update_price_extremes(tick.symbol, tick.price)
+
+            # Update risk manager mark-to-market.
             self.risk_manager.update_positions({tick.symbol: tick.price})
-            
-            # Check for exit signals on existing positions
+
+            # Check for exit signals on existing positions.
             self._check_exits(tick.symbol, tick.price)
-            
+
         except Exception as e:
             logger.error(f"Tick processing error: {e}")
             self._handle_error(e)
@@ -348,17 +359,41 @@ class TradingEngine:
         
         return now_et.time() >= flatten_time
     
+    def _load_watchlist(self) -> Set[str]:
+        """Read `config/watchlist.txt` (one symbol per line, # comments).
+
+        Returns an empty set if the file is missing — caller handles the
+        consequence (empty WebSocket subscription → no ticks → stale-feed
+        alerts). For paper trading, the file is generated from the most
+        recent backtest winners; see docs/paper_trade_ready_2026-05-21.md.
+        """
+        from pathlib import Path
+        p = Path("config/watchlist.txt")
+        if not p.exists():
+            logger.warning(f"watchlist not found at {p}; engine will subscribe to no symbols")
+            return set()
+        symbols = set()
+        for line in p.read_text().splitlines():
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            symbols.add(s.upper())
+        logger.info(f"loaded watchlist: {len(symbols)} symbols from {p}")
+        return symbols
+
     def _scan_for_setups(self):
-        """Scan for new trading setups."""
+        """Scan for new trading setups.
+
+        Currently a stub. The engine subscribes to its full watchlist at
+        startup; the signal engine filters the live tick stream for the
+        parabolic-reversal pattern (volume exhaustion + VWAP > 120% + 2+
+        confirming factors). When the live scanner is wired in, this hook
+        can dynamically add/remove symbols via self.alpaca.subscribe_symbols.
+        """
         if not self._in_execution_window():
             return
-        
-        # In production, this would query a real scanner
-        # For now, use predefined watchlist or mock scanning
-        # TODO: Integrate with external scanner API
-        
-        # Mock: Assume we have some candidates
-        # In reality, this would screen from market data
+        # TODO: Integrate with real-time scanner API for dynamic universe.
+        # Current behavior: rely on the static watchlist loaded in __init__.
         pass
     
     def run(self):
@@ -437,10 +472,16 @@ class TradingEngine:
             # AlpacaClient predates is_feed_stale — skip silently
             pass
 
-        # Check WebSocket connection
-        if not self.alpaca.is_connected():
-            logger.warning("WebSocket disconnected, attempting reconnect...")
-            self.alpaca.stop_websocket()
+        # Check WebSocket connection.
+        # Trust the internal _ws_handler reconnect loop for transient drops.
+        # Only intervene when the thread itself has died (rare — usually only
+        # on an unhandled exception inside the asyncio loop). This avoids the
+        # race condition where racing stop+start creates two threads/loops
+        # reading the same ws and triggers "cannot call recv while another
+        # coroutine is already running recv or recv_streaming".
+        ws_thread = getattr(self.alpaca, "ws_thread", None)
+        if ws_thread is None or not ws_thread.is_alive():
+            logger.warning("WebSocket thread died, restarting...")
             self.alpaca.start_websocket(self.subscribed_symbols)
         
         # Check account status

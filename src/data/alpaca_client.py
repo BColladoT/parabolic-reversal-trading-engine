@@ -57,6 +57,10 @@ class AlpacaClient:
         self.ws_url = "wss://stream.data.alpaca.markets/v2/iex"
         self.ws_thread: Optional[threading.Thread] = None
         self.ws_running = False
+        # Reference to the event loop owned by ws_thread. Used so the main
+        # thread can schedule coroutines (close, subscribe) on the correct
+        # loop via asyncio.run_coroutine_threadsafe. None when no thread.
+        self._ws_loop: Optional[asyncio.AbstractEventLoop] = None
         self.subscribed_symbols: Set[str] = set()
         
         # Callbacks
@@ -351,20 +355,28 @@ class AlpacaClient:
             return False
     
     async def _ws_subscribe(self, symbols: Set[str]):
-        """Subscribe to real-time data streams."""
+        """Subscribe to real-time data streams.
+
+        Alpaca v2 streaming API expects symbol lists per stream. The previous
+        ``"bars": ["1Min"]`` was a syntax error (Alpaca returned
+        ``{'T': 'error', 'code': 400, 'msg': 'invalid syntax'}``) because the
+        bars channel takes SYMBOLS, not timeframe strings. IEX stream emits
+        1-minute bars by default — no timeframe parameter exists. Subscribe
+        ``bars`` to the same symbol list as trades/quotes.
+        """
         if not symbols:
             return
-        
+
         symbol_list = list(symbols)
-        
-        # Subscribe to trades, quotes, and bars
+
+        # Subscribe to trades, quotes, and bars — all keyed by symbol list.
         subscribe_msg = {
             "action": "subscribe",
             "trades": symbol_list,
             "quotes": symbol_list,
-            "bars": ["1Min"]  # 1-minute bars
+            "bars": symbol_list,
         }
-        
+
         try:
             await self.ws.send(json.dumps(subscribe_msg))
             logger.info(f"Subscribed to: {symbol_list}")
@@ -458,42 +470,80 @@ class AlpacaClient:
             logger.error(f"WebSocket error: {data}")
     
     def start_websocket(self, symbols: Set[str]):
-        """Start WebSocket connection in background thread."""
+        """Start WebSocket connection in background thread.
+
+        Idempotent: if a thread is already running, this is a no-op. Callers
+        (e.g., the engine watchdog) MUST NOT pair this with stop_websocket()
+        for transient connection drops — the internal _ws_handler loop already
+        reconnects with exponential backoff. Only restart externally if the
+        thread itself has died (check ws_thread.is_alive()).
+        """
+        if self.ws_thread is not None and self.ws_thread.is_alive():
+            # Refresh subscribed set in case caller passed new symbols
+            self.subscribed_symbols = symbols
+            return
         self.subscribed_symbols = symbols
         self.ws_running = True
-        
+
         def run_async_loop():
             loop = asyncio.new_event_loop()
+            self._ws_loop = loop
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(self._ws_handler())
-        
+            try:
+                loop.run_until_complete(self._ws_handler())
+            finally:
+                self._ws_loop = None
+                try:
+                    loop.close()
+                except Exception:
+                    pass
+
         self.ws_thread = threading.Thread(target=run_async_loop, daemon=True)
         self.ws_thread.start()
         logger.info("WebSocket thread started")
-    
+
+    def _schedule_on_ws_loop(self, coro) -> None:
+        """Run ``coro`` on the WebSocket's own event loop from the main thread.
+
+        asyncio.create_task() called from a non-asyncio thread raises
+        RuntimeError. asyncio.run_coroutine_threadsafe() is the supported API
+        for cross-thread scheduling. Silently no-ops if the WS loop isn't
+        running (e.g., during shutdown teardown).
+        """
+        loop = self._ws_loop
+        if loop is None or loop.is_closed():
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(coro, loop)
+        except RuntimeError:
+            pass
+
     def stop_websocket(self):
-        """Stop WebSocket connection."""
-        self.ws_running = False
-        if self.ws:
-            asyncio.create_task(self.ws.close())
-        if self.ws_thread:
-            self.ws_thread.join(timeout=5)
+        """Stop WebSocket connection cleanly from any thread."""
+        self.ws_running = False  # signals _ws_handler loop to exit
+        if self.ws is not None:
+            self._schedule_on_ws_loop(self.ws.close())
+        if self.ws_thread is not None:
+            self.ws_thread.join(timeout=10)
+        self.ws_thread = None
+        self.ws = None
+        self._ws_loop = None
         logger.info("WebSocket stopped")
-    
+
     def subscribe_symbols(self, symbols: Set[str]):
         """Add symbols to subscription."""
         new_symbols = symbols - self.subscribed_symbols
         if new_symbols:
             self.subscribed_symbols.update(new_symbols)
             if self.ws and self._is_ws_open():
-                asyncio.create_task(self._ws_subscribe(new_symbols))
-    
+                self._schedule_on_ws_loop(self._ws_subscribe(new_symbols))
+
     def unsubscribe_symbols(self, symbols: Set[str]):
         """Remove symbols from subscription."""
         self.subscribed_symbols -= symbols
         # Alpaca doesn't support unsubscribe, need to reconnect
         if self.ws:
-            asyncio.create_task(self.ws.close())
+            self._schedule_on_ws_loop(self.ws.close())
     
     def set_tick_callback(self, callback: Callable[[TickData], None]):
         """Set callback for tick data."""
