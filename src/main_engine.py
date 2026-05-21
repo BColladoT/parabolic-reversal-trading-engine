@@ -335,9 +335,9 @@ class TradingEngine:
         """Check if within optimal execution window."""
         now_et = datetime.now(self.market_tz)
         
-        # Parse execution window times
-        exec_start = datetime.strptime(CONFIG.timezone.execution_window_start, "%H:%M").time()
-        exec_end = datetime.strptime(CONFIG.timezone.execution_window_end, "%H:%M").time()
+        # Parse entry window times (renamed from execution_window_* to match settings.yaml schema)
+        exec_start = datetime.strptime(CONFIG.timezone.entry_window_start, "%H:%M").time()
+        exec_end = datetime.strptime(CONFIG.timezone.entry_window_end, "%H:%M").time()
         
         return exec_start <= now_et.time() <= exec_end
     
