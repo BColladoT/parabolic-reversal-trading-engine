@@ -16,6 +16,8 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderType
 from alpaca.data.live.stock import StockDataStream
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockSnapshotRequest
 
 from src.utils.config import CONFIG
 from src.utils.logger import logger
@@ -50,6 +52,13 @@ class AlpacaClient:
             secret_key=self.secret_key,
             paper=self.paper
         )
+
+        # Historical-data REST client (for the dynamic scanner — full market
+        # snapshots in batches; bypasses the WS IEX 30-symbol cap).
+        self.data_client = StockHistoricalDataClient(
+            api_key=self.api_key,
+            secret_key=self.secret_key,
+        )
         
         # WebSocket
         self.ws = None
@@ -57,6 +66,10 @@ class AlpacaClient:
         self.ws_url = "wss://stream.data.alpaca.markets/v2/iex"
         self.ws_thread: Optional[threading.Thread] = None
         self.ws_running = False
+        # Reference to the event loop owned by ws_thread. Used so the main
+        # thread can schedule coroutines (close, subscribe) on the correct
+        # loop via asyncio.run_coroutine_threadsafe. None when no thread.
+        self._ws_loop: Optional[asyncio.AbstractEventLoop] = None
         self.subscribed_symbols: Set[str] = set()
         
         # Callbacks
@@ -130,6 +143,59 @@ class AlpacaClient:
             logger.error(f"Failed to get account: {e}")
             return {}
     
+    def get_snapshots(self, symbols, batch_size: int = 500) -> Dict[str, dict]:
+        """Fetch multi-symbol snapshots from Alpaca historical data API.
+
+        The snapshot endpoint returns the latest trade, latest quote, latest
+        minute bar, latest daily bar, and previous daily bar for each symbol
+        in one call. Used by the DynamicScanner to screen the full
+        micro-cap universe (~3,500 symbols) without hitting the WS streaming
+        cap (~30 symbols on IEX free tier).
+
+        Returns a dict ``{symbol: {latest_trade, latest_quote, daily_bar,
+        prev_daily_bar, minute_bar}}`` with primitives extracted from the
+        Alpaca SDK objects. Failures are logged but don't raise — partial
+        results are returned for whatever batches succeeded.
+
+        Args:
+            symbols: iterable of symbol strings.
+            batch_size: max symbols per request (Alpaca recommends <= 1000).
+        """
+        symbols = list(symbols)
+        out: Dict[str, dict] = {}
+        if not symbols:
+            return out
+        for i in range(0, len(symbols), batch_size):
+            chunk = symbols[i:i + batch_size]
+            try:
+                req = StockSnapshotRequest(symbol_or_symbols=chunk)
+                snaps = self.data_client.get_stock_snapshot(req)
+                for sym, snap in snaps.items():
+                    daily = getattr(snap, "daily_bar", None)
+                    prev_daily = getattr(snap, "previous_daily_bar", None)
+                    latest_trade = getattr(snap, "latest_trade", None)
+                    latest_quote = getattr(snap, "latest_quote", None)
+                    minute_bar = getattr(snap, "minute_bar", None)
+                    out[sym] = {
+                        "daily_bar": {
+                            "open": getattr(daily, "open", None),
+                            "high": getattr(daily, "high", None),
+                            "low": getattr(daily, "low", None),
+                            "close": getattr(daily, "close", None),
+                            "volume": getattr(daily, "volume", None),
+                        } if daily else None,
+                        "previous_daily_bar": {
+                            "close": getattr(prev_daily, "close", None),
+                        } if prev_daily else None,
+                        "latest_trade_price": getattr(latest_trade, "price", None),
+                        "latest_quote_ask": getattr(latest_quote, "ask_price", None),
+                        "latest_quote_bid": getattr(latest_quote, "bid_price", None),
+                        "minute_bar_close": getattr(minute_bar, "close", None),
+                    }
+            except Exception as e:
+                logger.error(f"get_snapshots batch {i}-{i+len(chunk)} failed: {e}")
+        return out
+
     def check_asset_shortable(self, symbol: str) -> Dict:
         """
         Check if an asset is shortable and easy to borrow.
@@ -350,21 +416,76 @@ class AlpacaClient:
             logger.error(f"WebSocket connection failed: {e}")
             return False
     
+    async def _ws_unsubscribe(self, symbols: Set[str]):
+        """Unsubscribe from streaming data for the given symbols.
+
+        Alpaca v2 streaming protocol supports symmetric unsubscribe via the
+        same channel layout as subscribe. Used by update_subscriptions() to
+        rotate the active symbol set as the DynamicScanner finds new top
+        candidates and drops stale ones — keeps the IEX free-tier slot
+        budget (~30 channel-subscriptions) usable.
+        """
+        if not symbols or not self.ws:
+            return
+        symbol_list = list(symbols)
+        unsubscribe_msg = {
+            "action": "unsubscribe",
+            "trades": symbol_list,
+            "quotes": symbol_list,
+            "bars": symbol_list,
+        }
+        try:
+            await self.ws.send(json.dumps(unsubscribe_msg))
+            logger.info(f"Unsubscribed from: {symbol_list}")
+        except Exception as e:
+            logger.error(f"Unsubscribe error: {e}")
+
+    def update_subscriptions(self, target: Set[str]):
+        """Diff current subscriptions vs ``target`` and send adds/removes.
+
+        Called by the engine's dynamic-scanner tick to rotate streaming
+        symbols. Thread-safe (uses run_coroutine_threadsafe via the
+        WS-thread event loop). No-op if the WS is not connected yet.
+        """
+        target = {s.upper() for s in target}
+        to_add = target - self.subscribed_symbols
+        to_remove = self.subscribed_symbols - target
+        if not to_add and not to_remove:
+            return
+        self.subscribed_symbols = set(target)
+        if self.ws is None or not self._is_ws_open():
+            # Not connected yet; the next reconnect cycle will pick up the
+            # updated subscribed_symbols set automatically (see _ws_handler).
+            logger.info(f"WS not open; subscriptions deferred (+{len(to_add)} / -{len(to_remove)})")
+            return
+        if to_remove:
+            self._schedule_on_ws_loop(self._ws_unsubscribe(to_remove))
+        if to_add:
+            self._schedule_on_ws_loop(self._ws_subscribe(to_add))
+
     async def _ws_subscribe(self, symbols: Set[str]):
-        """Subscribe to real-time data streams."""
+        """Subscribe to real-time data streams.
+
+        Alpaca v2 streaming API expects symbol lists per stream. The previous
+        ``"bars": ["1Min"]`` was a syntax error (Alpaca returned
+        ``{'T': 'error', 'code': 400, 'msg': 'invalid syntax'}``) because the
+        bars channel takes SYMBOLS, not timeframe strings. IEX stream emits
+        1-minute bars by default — no timeframe parameter exists. Subscribe
+        ``bars`` to the same symbol list as trades/quotes.
+        """
         if not symbols:
             return
-        
+
         symbol_list = list(symbols)
-        
-        # Subscribe to trades, quotes, and bars
+
+        # Subscribe to trades, quotes, and bars — all keyed by symbol list.
         subscribe_msg = {
             "action": "subscribe",
             "trades": symbol_list,
             "quotes": symbol_list,
-            "bars": ["1Min"]  # 1-minute bars
+            "bars": symbol_list,
         }
-        
+
         try:
             await self.ws.send(json.dumps(subscribe_msg))
             logger.info(f"Subscribed to: {symbol_list}")
@@ -458,42 +579,80 @@ class AlpacaClient:
             logger.error(f"WebSocket error: {data}")
     
     def start_websocket(self, symbols: Set[str]):
-        """Start WebSocket connection in background thread."""
+        """Start WebSocket connection in background thread.
+
+        Idempotent: if a thread is already running, this is a no-op. Callers
+        (e.g., the engine watchdog) MUST NOT pair this with stop_websocket()
+        for transient connection drops — the internal _ws_handler loop already
+        reconnects with exponential backoff. Only restart externally if the
+        thread itself has died (check ws_thread.is_alive()).
+        """
+        if self.ws_thread is not None and self.ws_thread.is_alive():
+            # Refresh subscribed set in case caller passed new symbols
+            self.subscribed_symbols = symbols
+            return
         self.subscribed_symbols = symbols
         self.ws_running = True
-        
+
         def run_async_loop():
             loop = asyncio.new_event_loop()
+            self._ws_loop = loop
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(self._ws_handler())
-        
+            try:
+                loop.run_until_complete(self._ws_handler())
+            finally:
+                self._ws_loop = None
+                try:
+                    loop.close()
+                except Exception:
+                    pass
+
         self.ws_thread = threading.Thread(target=run_async_loop, daemon=True)
         self.ws_thread.start()
         logger.info("WebSocket thread started")
-    
+
+    def _schedule_on_ws_loop(self, coro) -> None:
+        """Run ``coro`` on the WebSocket's own event loop from the main thread.
+
+        asyncio.create_task() called from a non-asyncio thread raises
+        RuntimeError. asyncio.run_coroutine_threadsafe() is the supported API
+        for cross-thread scheduling. Silently no-ops if the WS loop isn't
+        running (e.g., during shutdown teardown).
+        """
+        loop = self._ws_loop
+        if loop is None or loop.is_closed():
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(coro, loop)
+        except RuntimeError:
+            pass
+
     def stop_websocket(self):
-        """Stop WebSocket connection."""
-        self.ws_running = False
-        if self.ws:
-            asyncio.create_task(self.ws.close())
-        if self.ws_thread:
-            self.ws_thread.join(timeout=5)
+        """Stop WebSocket connection cleanly from any thread."""
+        self.ws_running = False  # signals _ws_handler loop to exit
+        if self.ws is not None:
+            self._schedule_on_ws_loop(self.ws.close())
+        if self.ws_thread is not None:
+            self.ws_thread.join(timeout=10)
+        self.ws_thread = None
+        self.ws = None
+        self._ws_loop = None
         logger.info("WebSocket stopped")
-    
+
     def subscribe_symbols(self, symbols: Set[str]):
         """Add symbols to subscription."""
         new_symbols = symbols - self.subscribed_symbols
         if new_symbols:
             self.subscribed_symbols.update(new_symbols)
             if self.ws and self._is_ws_open():
-                asyncio.create_task(self._ws_subscribe(new_symbols))
-    
+                self._schedule_on_ws_loop(self._ws_subscribe(new_symbols))
+
     def unsubscribe_symbols(self, symbols: Set[str]):
         """Remove symbols from subscription."""
         self.subscribed_symbols -= symbols
         # Alpaca doesn't support unsubscribe, need to reconnect
         if self.ws:
-            asyncio.create_task(self.ws.close())
+            self._schedule_on_ws_loop(self.ws.close())
     
     def set_tick_callback(self, callback: Callable[[TickData], None]):
         """Set callback for tick data."""

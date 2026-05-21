@@ -1,0 +1,1377 @@
+{
+  "generated_at": "2026-05-21T12:30:25.599996",
+  "comparison_methodology": "Same test setups, same execution/accounting",
+  "sizing_modes_compared": [
+    "fixed_shares",
+    "fixed_fraction_of_equity"
+  ],
+  "per_fold": [
+    {
+      "fold": 1,
+      "test_window": {
+        "start": "2024-01-01T00:00:00",
+        "end": "2024-06-30T00:00:00"
+      },
+      "rl_metrics": {
+        "total_test_pnl": 149.0419590792735,
+        "mean_episode_pnl": 2.9808391815854702,
+        "win_rate": 0.26,
+        "total_trades": 0,
+        "mean_trades_per_episode": 0.0
+      },
+      "vs_fixed_shares": {
+        "rl_total_pnl": 149.0419590792735,
+        "rule_total_pnl": 821.8012903876515,
+        "pnl_difference": -672.759331308378,
+        "pnl_improvement_pct": -81.86399062369823,
+        "pnl_ratio": 0.18136009376301782,
+        "rl_win_rate": 0.26,
+        "rule_win_rate": 0.26,
+        "rl_mean_pnl": 2.9808391815854702,
+        "rule_mean_pnl": 16.43602580775303,
+        "rl_total_trades": 0,
+        "rule_total_trades": 17,
+        "rl_avg_trades_per_ep": 0.0,
+        "rule_avg_trades_per_ep": 0.34,
+        "verdict": "FAIL",
+        "verdict_reason": "RL underperforms rule by 81.9%"
+      },
+      "vs_fraction_of_equity": {
+        "rl_total_pnl": 149.0419590792735,
+        "rule_total_pnl": 821.8012903876515,
+        "pnl_difference": -672.759331308378,
+        "pnl_improvement_pct": -81.86399062369823,
+        "pnl_ratio": 0.18136009376301782,
+        "rl_win_rate": 0.26,
+        "rule_win_rate": 0.26,
+        "rl_mean_pnl": 2.9808391815854702,
+        "rule_mean_pnl": 16.43602580775303,
+        "rl_total_trades": 0,
+        "rule_total_trades": 17,
+        "rl_avg_trades_per_ep": 0.0,
+        "rule_avg_trades_per_ep": 0.34,
+        "verdict": "FAIL",
+        "verdict_reason": "RL underperforms rule by 81.9%"
+      }
+    }
+  ],
+  "aggregate": {
+    "total_folds": 1,
+    "vs_fixed_shares": {
+      "pass_count": 0,
+      "marginal_count": 0,
+      "fail_count": 1,
+      "overall_verdict": "FAIL"
+    },
+    "vs_fraction_of_equity": {
+      "pass_count": 0,
+      "marginal_count": 0,
+      "fail_count": 1,
+      "overall_verdict": "FAIL"
+    }
+  },
+  "final_conclusion": "RL FAILS to justify itself against rule baseline",
+  "summary_fixed_shares": {
+    "sizing_mode": "fixed_shares",
+    "n_setups": 50,
+    "test_window": {
+      "start": "2024-01-01T00:00:00",
+      "end": "2024-06-30T00:00:00"
+    },
+    "setup_list": [
+      {
+        "symbol": "YYAI",
+        "date": "2024-04-19"
+      },
+      {
+        "symbol": "GME",
+        "date": "2024-05-14"
+      },
+      {
+        "symbol": "SUNE",
+        "date": "2024-05-07"
+      },
+      {
+        "symbol": "CETX",
+        "date": "2024-05-17"
+      },
+      {
+        "symbol": "IPW",
+        "date": "2024-05-17"
+      },
+      {
+        "symbol": "NAK",
+        "date": "2024-01-08"
+      },
+      {
+        "symbol": "RVSN",
+        "date": "2024-01-22"
+      },
+      {
+        "symbol": "BYSI",
+        "date": "2024-03-06"
+      },
+      {
+        "symbol": "BDRX",
+        "date": "2024-02-07"
+      },
+      {
+        "symbol": "SMX",
+        "date": "2024-05-24"
+      },
+      {
+        "symbol": "UPLD",
+        "date": "2024-02-23"
+      },
+      {
+        "symbol": "NCPL",
+        "date": "2024-05-23"
+      },
+      {
+        "symbol": "MULN",
+        "date": "2024-05-06"
+      },
+      {
+        "symbol": "XTIA",
+        "date": "2024-03-11"
+      },
+      {
+        "symbol": "ASTI",
+        "date": "2024-05-17"
+      },
+      {
+        "symbol": "CXAI",
+        "date": "2024-04-01"
+      },
+      {
+        "symbol": "GMM",
+        "date": "2024-03-18"
+      },
+      {
+        "symbol": "DWTX",
+        "date": "2024-06-05"
+      },
+      {
+        "symbol": "WORX",
+        "date": "2024-03-19"
+      },
+      {
+        "symbol": "LUCY",
+        "date": "2024-05-29"
+      },
+      {
+        "symbol": "FBLG",
+        "date": "2024-06-06"
+      },
+      {
+        "symbol": "SBEV",
+        "date": "2024-05-31"
+      },
+      {
+        "symbol": "PDYN",
+        "date": "2024-02-28"
+      },
+      {
+        "symbol": "GDC",
+        "date": "2024-04-08"
+      },
+      {
+        "symbol": "VXRT",
+        "date": "2024-06-18"
+      },
+      {
+        "symbol": "GRI",
+        "date": "2024-02-01"
+      },
+      {
+        "symbol": "EMPD",
+        "date": "2024-02-14"
+      },
+      {
+        "symbol": "NNE",
+        "date": "2024-06-20"
+      },
+      {
+        "symbol": "SUNE",
+        "date": "2024-05-30"
+      },
+      {
+        "symbol": "TWAV",
+        "date": "2024-05-15"
+      },
+      {
+        "symbol": "STI",
+        "date": "2024-03-14"
+      },
+      {
+        "symbol": "JFBR",
+        "date": "2024-05-30"
+      },
+      {
+        "symbol": "EMPD",
+        "date": "2024-01-16"
+      },
+      {
+        "symbol": "GXAI",
+        "date": "2024-02-16"
+      },
+      {
+        "symbol": "SNOA",
+        "date": "2024-05-17"
+      },
+      {
+        "symbol": "DVLT",
+        "date": "2024-05-15"
+      },
+      {
+        "symbol": "IMNN",
+        "date": "2024-02-28"
+      },
+      {
+        "symbol": "BNED",
+        "date": "2024-06-10"
+      },
+      {
+        "symbol": "SGMO",
+        "date": "2024-02-16"
+      },
+      {
+        "symbol": "OPK",
+        "date": "2024-01-04"
+      },
+      {
+        "symbol": "OPTU",
+        "date": "2024-02-26"
+      },
+      {
+        "symbol": "RYDE",
+        "date": "2024-06-06"
+      },
+      {
+        "symbol": "VERU",
+        "date": "2024-04-11"
+      },
+      {
+        "symbol": "HSDT",
+        "date": "2024-02-06"
+      },
+      {
+        "symbol": "SMX",
+        "date": "2024-02-27"
+      },
+      {
+        "symbol": "HURA",
+        "date": "2024-06-27"
+      },
+      {
+        "symbol": "HOLO",
+        "date": "2024-03-28"
+      },
+      {
+        "symbol": "CADL",
+        "date": "2024-05-24"
+      },
+      {
+        "symbol": "QMCO",
+        "date": "2024-02-14"
+      },
+      {
+        "symbol": "LIDR",
+        "date": "2024-05-10"
+      }
+    ],
+    "rl": {
+      "n_seeds": 3,
+      "total_test_pnl": 149.0419590792735,
+      "total_test_pnl_per_seed": [
+        149.0419590792735,
+        149.0419590792735,
+        149.0419590792735
+      ],
+      "total_test_pnl_std_across_seeds": 0.0,
+      "win_rate": 0.26,
+      "win_rate_per_seed": [
+        0.26,
+        0.26,
+        0.26
+      ],
+      "mean_per_setup_pnls": [
+        0.0,
+        0.0,
+        5.49629813307547,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -14.08592338633025,
+        0.0,
+        22.357458437792957,
+        0.0,
+        27.958194527600426,
+        0.0,
+        -114.62001461115142,
+        100.55881643260363,
+        65.23850931676861,
+        94.03992908842338,
+        -81.56180418143049,
+        -78.97699856985128,
+        0.0,
+        -7.345249458579929,
+        0.0,
+        -2.16407669732871,
+        77.23350801774359,
+        0.0,
+        44.733412389381556,
+        0.0,
+        0.0,
+        -22.773524157280917,
+        32.44211505790008,
+        25.68380818705191,
+        0.0,
+        0.0,
+        0.0,
+        35.38333333333139,
+        0.0,
+        -8.019745932062506,
+        0.0,
+        -26.71359956645756,
+        0.0,
+        -15.916135377396131,
+        0.0,
+        -6.423529411767959,
+        0.0,
+        31.99400449526729,
+        0.0,
+        13.383974500306067,
+        -48.86080148833571
+      ]
+    },
+    "rule_baseline": {
+      "total_test_pnl": 821.8012903876515,
+      "mean_episode_pnl": 16.43602580775303,
+      "win_rate": 0.26,
+      "total_trades": 17,
+      "mean_trades_per_episode": 0.34,
+      "mean_winner": 70.54772143906806,
+      "mean_loser": -23.82977208005832,
+      "n_winners": 13,
+      "n_losers": 4,
+      "n_zero_pnl": 33,
+      "per_setup_pnls": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        4.709734513264266,
+        0.0,
+        27.421706956083653,
+        0.0,
+        34.02088698139414,
+        0.0,
+        -24.659511031597503,
+        102.87783251231303,
+        65.23850931676861,
+        0.0,
+        -44.31797999513219,
+        174.32786885245878,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        238.30617283951142,
+        0.0,
+        157.59163591635297,
+        0.0,
+        0.0,
+        3.911278195490013,
+        33.30705679861421,
+        38.864882943133125,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        17.315904936011066,
+        0.0,
+        -15.615015015020617,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        19.22690794648952,
+        -10.726582278482965
+      ],
+      "per_episode_results": [
+        {
+          "symbol": "YYAI",
+          "date": "2024-04-19",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "GME",
+          "date": "2024-05-14",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "SUNE",
+          "date": "2024-05-07",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "CETX",
+          "date": "2024-05-17",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "IPW",
+          "date": "2024-05-17",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "NAK",
+          "date": "2024-01-08",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "RVSN",
+          "date": "2024-01-22",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "BYSI",
+          "date": "2024-03-06",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "BDRX",
+          "date": "2024-02-07",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "SMX",
+          "date": "2024-05-24",
+          "pnl": 4.709734513264266,
+          "trades": 1
+        },
+        {
+          "symbol": "UPLD",
+          "date": "2024-02-23",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "NCPL",
+          "date": "2024-05-23",
+          "pnl": 27.421706956083653,
+          "trades": 1
+        },
+        {
+          "symbol": "MULN",
+          "date": "2024-05-06",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "XTIA",
+          "date": "2024-03-11",
+          "pnl": 34.02088698139414,
+          "trades": 1
+        },
+        {
+          "symbol": "ASTI",
+          "date": "2024-05-17",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "CXAI",
+          "date": "2024-04-01",
+          "pnl": -24.659511031597503,
+          "trades": 1
+        },
+        {
+          "symbol": "GMM",
+          "date": "2024-03-18",
+          "pnl": 102.87783251231303,
+          "trades": 1
+        },
+        {
+          "symbol": "DWTX",
+          "date": "2024-06-05",
+          "pnl": 65.23850931676861,
+          "trades": 1
+        },
+        {
+          "symbol": "WORX",
+          "date": "2024-03-19",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "LUCY",
+          "date": "2024-05-29",
+          "pnl": -44.31797999513219,
+          "trades": 1
+        },
+        {
+          "symbol": "FBLG",
+          "date": "2024-06-06",
+          "pnl": 174.32786885245878,
+          "trades": 1
+        },
+        {
+          "symbol": "SBEV",
+          "date": "2024-05-31",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "PDYN",
+          "date": "2024-02-28",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "GDC",
+          "date": "2024-04-08",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "VXRT",
+          "date": "2024-06-18",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "GRI",
+          "date": "2024-02-01",
+          "pnl": 238.30617283951142,
+          "trades": 1
+        },
+        {
+          "symbol": "EMPD",
+          "date": "2024-02-14",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "NNE",
+          "date": "2024-06-20",
+          "pnl": 157.59163591635297,
+          "trades": 1
+        },
+        {
+          "symbol": "SUNE",
+          "date": "2024-05-30",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "TWAV",
+          "date": "2024-05-15",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "STI",
+          "date": "2024-03-14",
+          "pnl": 3.911278195490013,
+          "trades": 1
+        },
+        {
+          "symbol": "JFBR",
+          "date": "2024-05-30",
+          "pnl": 33.30705679861421,
+          "trades": 1
+        },
+        {
+          "symbol": "EMPD",
+          "date": "2024-01-16",
+          "pnl": 38.864882943133125,
+          "trades": 1
+        },
+        {
+          "symbol": "GXAI",
+          "date": "2024-02-16",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "SNOA",
+          "date": "2024-05-17",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "DVLT",
+          "date": "2024-05-15",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "IMNN",
+          "date": "2024-02-28",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "BNED",
+          "date": "2024-06-10",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "SGMO",
+          "date": "2024-02-16",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "OPK",
+          "date": "2024-01-04",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "OPTU",
+          "date": "2024-02-26",
+          "pnl": 17.315904936011066,
+          "trades": 1
+        },
+        {
+          "symbol": "RYDE",
+          "date": "2024-06-06",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "VERU",
+          "date": "2024-04-11",
+          "pnl": -15.615015015020617,
+          "trades": 1
+        },
+        {
+          "symbol": "HSDT",
+          "date": "2024-02-06",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "SMX",
+          "date": "2024-02-27",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "HURA",
+          "date": "2024-06-27",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "HOLO",
+          "date": "2024-03-28",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "CADL",
+          "date": "2024-05-24",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "QMCO",
+          "date": "2024-02-14",
+          "pnl": 19.22690794648952,
+          "trades": 1
+        },
+        {
+          "symbol": "LIDR",
+          "date": "2024-05-10",
+          "pnl": -10.726582278482965,
+          "trades": 1
+        }
+      ]
+    },
+    "delta": {
+      "rule_minus_rl_total_pnl": 672.759331308378,
+      "rule_beats_rl": true,
+      "rl_minus_rule_total_pnl": -672.759331308378
+    }
+  },
+  "summary_fraction_of_equity": {
+    "sizing_mode": "fixed_fraction_of_equity",
+    "n_setups": 50,
+    "test_window": {
+      "start": "2024-01-01T00:00:00",
+      "end": "2024-06-30T00:00:00"
+    },
+    "setup_list": [
+      {
+        "symbol": "YYAI",
+        "date": "2024-04-19"
+      },
+      {
+        "symbol": "GME",
+        "date": "2024-05-14"
+      },
+      {
+        "symbol": "SUNE",
+        "date": "2024-05-07"
+      },
+      {
+        "symbol": "CETX",
+        "date": "2024-05-17"
+      },
+      {
+        "symbol": "IPW",
+        "date": "2024-05-17"
+      },
+      {
+        "symbol": "NAK",
+        "date": "2024-01-08"
+      },
+      {
+        "symbol": "RVSN",
+        "date": "2024-01-22"
+      },
+      {
+        "symbol": "BYSI",
+        "date": "2024-03-06"
+      },
+      {
+        "symbol": "BDRX",
+        "date": "2024-02-07"
+      },
+      {
+        "symbol": "SMX",
+        "date": "2024-05-24"
+      },
+      {
+        "symbol": "UPLD",
+        "date": "2024-02-23"
+      },
+      {
+        "symbol": "NCPL",
+        "date": "2024-05-23"
+      },
+      {
+        "symbol": "MULN",
+        "date": "2024-05-06"
+      },
+      {
+        "symbol": "XTIA",
+        "date": "2024-03-11"
+      },
+      {
+        "symbol": "ASTI",
+        "date": "2024-05-17"
+      },
+      {
+        "symbol": "CXAI",
+        "date": "2024-04-01"
+      },
+      {
+        "symbol": "GMM",
+        "date": "2024-03-18"
+      },
+      {
+        "symbol": "DWTX",
+        "date": "2024-06-05"
+      },
+      {
+        "symbol": "WORX",
+        "date": "2024-03-19"
+      },
+      {
+        "symbol": "LUCY",
+        "date": "2024-05-29"
+      },
+      {
+        "symbol": "FBLG",
+        "date": "2024-06-06"
+      },
+      {
+        "symbol": "SBEV",
+        "date": "2024-05-31"
+      },
+      {
+        "symbol": "PDYN",
+        "date": "2024-02-28"
+      },
+      {
+        "symbol": "GDC",
+        "date": "2024-04-08"
+      },
+      {
+        "symbol": "VXRT",
+        "date": "2024-06-18"
+      },
+      {
+        "symbol": "GRI",
+        "date": "2024-02-01"
+      },
+      {
+        "symbol": "EMPD",
+        "date": "2024-02-14"
+      },
+      {
+        "symbol": "NNE",
+        "date": "2024-06-20"
+      },
+      {
+        "symbol": "SUNE",
+        "date": "2024-05-30"
+      },
+      {
+        "symbol": "TWAV",
+        "date": "2024-05-15"
+      },
+      {
+        "symbol": "STI",
+        "date": "2024-03-14"
+      },
+      {
+        "symbol": "JFBR",
+        "date": "2024-05-30"
+      },
+      {
+        "symbol": "EMPD",
+        "date": "2024-01-16"
+      },
+      {
+        "symbol": "GXAI",
+        "date": "2024-02-16"
+      },
+      {
+        "symbol": "SNOA",
+        "date": "2024-05-17"
+      },
+      {
+        "symbol": "DVLT",
+        "date": "2024-05-15"
+      },
+      {
+        "symbol": "IMNN",
+        "date": "2024-02-28"
+      },
+      {
+        "symbol": "BNED",
+        "date": "2024-06-10"
+      },
+      {
+        "symbol": "SGMO",
+        "date": "2024-02-16"
+      },
+      {
+        "symbol": "OPK",
+        "date": "2024-01-04"
+      },
+      {
+        "symbol": "OPTU",
+        "date": "2024-02-26"
+      },
+      {
+        "symbol": "RYDE",
+        "date": "2024-06-06"
+      },
+      {
+        "symbol": "VERU",
+        "date": "2024-04-11"
+      },
+      {
+        "symbol": "HSDT",
+        "date": "2024-02-06"
+      },
+      {
+        "symbol": "SMX",
+        "date": "2024-02-27"
+      },
+      {
+        "symbol": "HURA",
+        "date": "2024-06-27"
+      },
+      {
+        "symbol": "HOLO",
+        "date": "2024-03-28"
+      },
+      {
+        "symbol": "CADL",
+        "date": "2024-05-24"
+      },
+      {
+        "symbol": "QMCO",
+        "date": "2024-02-14"
+      },
+      {
+        "symbol": "LIDR",
+        "date": "2024-05-10"
+      }
+    ],
+    "rl": {
+      "n_seeds": 3,
+      "total_test_pnl": 149.0419590792735,
+      "total_test_pnl_per_seed": [
+        149.0419590792735,
+        149.0419590792735,
+        149.0419590792735
+      ],
+      "total_test_pnl_std_across_seeds": 0.0,
+      "win_rate": 0.26,
+      "win_rate_per_seed": [
+        0.26,
+        0.26,
+        0.26
+      ],
+      "mean_per_setup_pnls": [
+        0.0,
+        0.0,
+        5.49629813307547,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -14.08592338633025,
+        0.0,
+        22.357458437792957,
+        0.0,
+        27.958194527600426,
+        0.0,
+        -114.62001461115142,
+        100.55881643260363,
+        65.23850931676861,
+        94.03992908842338,
+        -81.56180418143049,
+        -78.97699856985128,
+        0.0,
+        -7.345249458579929,
+        0.0,
+        -2.16407669732871,
+        77.23350801774359,
+        0.0,
+        44.733412389381556,
+        0.0,
+        0.0,
+        -22.773524157280917,
+        32.44211505790008,
+        25.68380818705191,
+        0.0,
+        0.0,
+        0.0,
+        35.38333333333139,
+        0.0,
+        -8.019745932062506,
+        0.0,
+        -26.71359956645756,
+        0.0,
+        -15.916135377396131,
+        0.0,
+        -6.423529411767959,
+        0.0,
+        31.99400449526729,
+        0.0,
+        13.383974500306067,
+        -48.86080148833571
+      ]
+    },
+    "rule_baseline": {
+      "total_test_pnl": 821.8012903876515,
+      "mean_episode_pnl": 16.43602580775303,
+      "win_rate": 0.26,
+      "total_trades": 17,
+      "mean_trades_per_episode": 0.34,
+      "mean_winner": 70.54772143906806,
+      "mean_loser": -23.82977208005832,
+      "n_winners": 13,
+      "n_losers": 4,
+      "n_zero_pnl": 33,
+      "per_setup_pnls": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        4.709734513264266,
+        0.0,
+        27.421706956083653,
+        0.0,
+        34.02088698139414,
+        0.0,
+        -24.659511031597503,
+        102.87783251231303,
+        65.23850931676861,
+        0.0,
+        -44.31797999513219,
+        174.32786885245878,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        238.30617283951142,
+        0.0,
+        157.59163591635297,
+        0.0,
+        0.0,
+        3.911278195490013,
+        33.30705679861421,
+        38.864882943133125,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        17.315904936011066,
+        0.0,
+        -15.615015015020617,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        19.22690794648952,
+        -10.726582278482965
+      ],
+      "per_episode_results": [
+        {
+          "symbol": "YYAI",
+          "date": "2024-04-19",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "GME",
+          "date": "2024-05-14",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "SUNE",
+          "date": "2024-05-07",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "CETX",
+          "date": "2024-05-17",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "IPW",
+          "date": "2024-05-17",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "NAK",
+          "date": "2024-01-08",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "RVSN",
+          "date": "2024-01-22",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "BYSI",
+          "date": "2024-03-06",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "BDRX",
+          "date": "2024-02-07",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "SMX",
+          "date": "2024-05-24",
+          "pnl": 4.709734513264266,
+          "trades": 1
+        },
+        {
+          "symbol": "UPLD",
+          "date": "2024-02-23",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "NCPL",
+          "date": "2024-05-23",
+          "pnl": 27.421706956083653,
+          "trades": 1
+        },
+        {
+          "symbol": "MULN",
+          "date": "2024-05-06",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "XTIA",
+          "date": "2024-03-11",
+          "pnl": 34.02088698139414,
+          "trades": 1
+        },
+        {
+          "symbol": "ASTI",
+          "date": "2024-05-17",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "CXAI",
+          "date": "2024-04-01",
+          "pnl": -24.659511031597503,
+          "trades": 1
+        },
+        {
+          "symbol": "GMM",
+          "date": "2024-03-18",
+          "pnl": 102.87783251231303,
+          "trades": 1
+        },
+        {
+          "symbol": "DWTX",
+          "date": "2024-06-05",
+          "pnl": 65.23850931676861,
+          "trades": 1
+        },
+        {
+          "symbol": "WORX",
+          "date": "2024-03-19",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "LUCY",
+          "date": "2024-05-29",
+          "pnl": -44.31797999513219,
+          "trades": 1
+        },
+        {
+          "symbol": "FBLG",
+          "date": "2024-06-06",
+          "pnl": 174.32786885245878,
+          "trades": 1
+        },
+        {
+          "symbol": "SBEV",
+          "date": "2024-05-31",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "PDYN",
+          "date": "2024-02-28",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "GDC",
+          "date": "2024-04-08",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "VXRT",
+          "date": "2024-06-18",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "GRI",
+          "date": "2024-02-01",
+          "pnl": 238.30617283951142,
+          "trades": 1
+        },
+        {
+          "symbol": "EMPD",
+          "date": "2024-02-14",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "NNE",
+          "date": "2024-06-20",
+          "pnl": 157.59163591635297,
+          "trades": 1
+        },
+        {
+          "symbol": "SUNE",
+          "date": "2024-05-30",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "TWAV",
+          "date": "2024-05-15",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "STI",
+          "date": "2024-03-14",
+          "pnl": 3.911278195490013,
+          "trades": 1
+        },
+        {
+          "symbol": "JFBR",
+          "date": "2024-05-30",
+          "pnl": 33.30705679861421,
+          "trades": 1
+        },
+        {
+          "symbol": "EMPD",
+          "date": "2024-01-16",
+          "pnl": 38.864882943133125,
+          "trades": 1
+        },
+        {
+          "symbol": "GXAI",
+          "date": "2024-02-16",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "SNOA",
+          "date": "2024-05-17",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "DVLT",
+          "date": "2024-05-15",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "IMNN",
+          "date": "2024-02-28",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "BNED",
+          "date": "2024-06-10",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "SGMO",
+          "date": "2024-02-16",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "OPK",
+          "date": "2024-01-04",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "OPTU",
+          "date": "2024-02-26",
+          "pnl": 17.315904936011066,
+          "trades": 1
+        },
+        {
+          "symbol": "RYDE",
+          "date": "2024-06-06",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "VERU",
+          "date": "2024-04-11",
+          "pnl": -15.615015015020617,
+          "trades": 1
+        },
+        {
+          "symbol": "HSDT",
+          "date": "2024-02-06",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "SMX",
+          "date": "2024-02-27",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "HURA",
+          "date": "2024-06-27",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "HOLO",
+          "date": "2024-03-28",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "CADL",
+          "date": "2024-05-24",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "QMCO",
+          "date": "2024-02-14",
+          "pnl": 19.22690794648952,
+          "trades": 1
+        },
+        {
+          "symbol": "LIDR",
+          "date": "2024-05-10",
+          "pnl": -10.726582278482965,
+          "trades": 1
+        }
+      ]
+    },
+    "delta": {
+      "rule_minus_rl_total_pnl": 672.759331308378,
+      "rule_beats_rl": true,
+      "rl_minus_rule_total_pnl": -672.759331308378
+    }
+  },
+  "rl_results_paths": [
+    "models/ppo_discrete_h1_s42/quick_test_results.json",
+    "models/ppo_discrete_h1_s43/quick_test_results.json",
+    "models/ppo_discrete_h1_s44/quick_test_results.json"
+  ]
+}

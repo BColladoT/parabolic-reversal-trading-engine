@@ -44,12 +44,21 @@ class TradingEngine:
         self.screener = ParabolicScreener(self.alpaca)
         self.risk_manager = RiskManager(self.alpaca)
         self.signal_engine = ParabolicSignalEngine(self.data_engine)
+        # Dynamic universe scanner — rotates WS subscriptions to today's
+        # top parabolic candidates across the ~3,500-symbol micro-cap
+        # universe (replaces the static 10-symbol watchlist).
+        from src.screening.dynamic_scanner import DynamicScanner
+        self.scanner = DynamicScanner(self.alpaca)
         
         # State
         self.running = False
         self.market_open = False
-        self.subscribed_symbols: Set[str] = set()
-        self.watch_symbols: Set[str] = set()
+        # Load curated watchlist from config/watchlist.txt; engine will subscribe
+        # to these symbols on startup. _scan_for_setups() is a stub for now —
+        # real-time scanner integration is future work. With an empty watchlist
+        # the WebSocket auths but no ticks flow ("stale feed" CRITICAL).
+        self.subscribed_symbols: Set[str] = self._load_watchlist()
+        self.watch_symbols: Set[str] = set(self.subscribed_symbols)
         
         # Self-healing
         self.error_count = 0
@@ -86,22 +95,29 @@ class TradingEngine:
         sys.exit(0)
     
     def _on_tick(self, tick: TickData):
-        """Process incoming tick data."""
+        """Process incoming tick data.
+
+        The data_engine aggregates ticks into bars (PolarsSignalEngine).
+        The signal_engine (ParabolicSignalEngine) works on aggregated bars
+        and exposes update_price_extremes() for tick-level high/low tracking,
+        but NOT a single update_tick() method (the prior code's reference
+        was a leftover from an older API). Bar-level signal evaluation
+        runs on bar-close inside data_engine, which fires the signal_engine's
+        registered callbacks.
+        """
         try:
-            # Update data engine
+            # Update data engine (bar aggregation + bar-close signal eval).
             self.data_engine.process_tick(tick)
-            
-            # Update signal engine
-            self.signal_engine.update_tick(
-                tick.symbol, tick.price, tick.size, tick.timestamp
-            )
-            
-            # Update risk manager
+
+            # Track day high/low on the signal engine per-tick.
+            self.signal_engine.update_price_extremes(tick.symbol, tick.price)
+
+            # Update risk manager mark-to-market.
             self.risk_manager.update_positions({tick.symbol: tick.price})
-            
-            # Check for exit signals on existing positions
+
+            # Check for exit signals on existing positions.
             self._check_exits(tick.symbol, tick.price)
-            
+
         except Exception as e:
             logger.error(f"Tick processing error: {e}")
             self._handle_error(e)
@@ -335,9 +351,9 @@ class TradingEngine:
         """Check if within optimal execution window."""
         now_et = datetime.now(self.market_tz)
         
-        # Parse execution window times
-        exec_start = datetime.strptime(CONFIG.timezone.execution_window_start, "%H:%M").time()
-        exec_end = datetime.strptime(CONFIG.timezone.execution_window_end, "%H:%M").time()
+        # Parse entry window times (renamed from execution_window_* to match settings.yaml schema)
+        exec_start = datetime.strptime(CONFIG.timezone.entry_window_start, "%H:%M").time()
+        exec_end = datetime.strptime(CONFIG.timezone.entry_window_end, "%H:%M").time()
         
         return exec_start <= now_et.time() <= exec_end
     
@@ -348,18 +364,60 @@ class TradingEngine:
         
         return now_et.time() >= flatten_time
     
+    def _load_watchlist(self) -> Set[str]:
+        """Seed the WS subscription set at startup.
+
+        The DynamicScanner takes over after the first scan tick (~60s into
+        the main loop). This file-loaded seed is a fallback only: it
+        guarantees the engine has SOMETHING subscribed before the scanner
+        runs, in case the scanner returns 0 candidates on cold start
+        (e.g., pre-market, or no qualifying gainers at startup).
+
+        Reads `config/watchlist.txt` (one symbol per line, # comments).
+        """
+        from pathlib import Path
+        p = Path("config/watchlist.txt")
+        if not p.exists():
+            logger.warning(f"watchlist not found at {p}; engine will subscribe to no symbols")
+            return set()
+        symbols = set()
+        for line in p.read_text().splitlines():
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            symbols.add(s.upper())
+        logger.info(f"loaded watchlist (seed): {len(symbols)} symbols from {p}")
+        return symbols
+
     def _scan_for_setups(self):
-        """Scan for new trading setups."""
+        """Run the DynamicScanner and rotate WS subscriptions to the top
+        parabolic candidates across the full micro-cap universe.
+
+        Called every ~60s from the main loop. The scanner does a REST
+        snapshot of ~3,500 symbols (~3-5s), applies the screening filters
+        from config/settings.yaml, ranks survivors by setup-quality, and
+        returns the top N. We diff against the current subscription set and
+        send add/remove via update_subscriptions(), staying under the IEX
+        free-tier cap (~10 symbols × 3 channels).
+
+        Outside the entry window (09:45–14:30 ET), the scanner is skipped
+        — we let the WS keep streaming what it has so already-open positions
+        continue to mark-to-market.
+        """
         if not self._in_execution_window():
             return
-        
-        # In production, this would query a real scanner
-        # For now, use predefined watchlist or mock scanning
-        # TODO: Integrate with external scanner API
-        
-        # Mock: Assume we have some candidates
-        # In reality, this would screen from market data
-        pass
+        try:
+            target = self.scanner.select_symbols(max_candidates=10)
+        except Exception as e:
+            logger.error(f"DynamicScanner failed: {e}")
+            return
+        if not target:
+            # No parabolic setups right now; keep current subscriptions
+            # rather than going silent. The engine still mark-to-markets
+            # any held positions on the existing stream.
+            return
+        self.subscribed_symbols = set(target)
+        self.alpaca.update_subscriptions(target)
     
     def run(self):
         """Main trading loop."""
@@ -437,10 +495,16 @@ class TradingEngine:
             # AlpacaClient predates is_feed_stale — skip silently
             pass
 
-        # Check WebSocket connection
-        if not self.alpaca.is_connected():
-            logger.warning("WebSocket disconnected, attempting reconnect...")
-            self.alpaca.stop_websocket()
+        # Check WebSocket connection.
+        # Trust the internal _ws_handler reconnect loop for transient drops.
+        # Only intervene when the thread itself has died (rare — usually only
+        # on an unhandled exception inside the asyncio loop). This avoids the
+        # race condition where racing stop+start creates two threads/loops
+        # reading the same ws and triggers "cannot call recv while another
+        # coroutine is already running recv or recv_streaming".
+        ws_thread = getattr(self.alpaca, "ws_thread", None)
+        if ws_thread is None or not ws_thread.is_alive():
+            logger.warning("WebSocket thread died, restarting...")
             self.alpaca.start_websocket(self.subscribed_symbols)
         
         # Check account status

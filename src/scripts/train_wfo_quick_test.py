@@ -46,6 +46,20 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+def _discrete_bins_kwarg(config) -> Dict[str, int]:
+    """Return ``{"discrete_action_bins": N}`` if the CLI overrode it, else ``{}``.
+
+    Used to splat into env_config dicts (training + eval) so a None override
+    doesn't replace the env's int default of 7. argparse has already
+    constrained ``N`` to ``{3, 5, 7, 9, 11}`` at parse time, and the env
+    re-validates as defense-in-depth.
+    """
+    n = getattr(config, '_discrete_action_bins', None)
+    if n is None:
+        return {}
+    return {"discrete_action_bins": int(n)}
+
+
 def _detect_data_range(csv_path: Path = None) -> tuple:
     """
     Auto-detect available data range from the CSV setups file.
@@ -190,6 +204,7 @@ class QuickWFOTrainer:
                     "entry_threshold": getattr(self.config, '_entry_threshold', None),
                     "cover_threshold": getattr(self.config, '_cover_threshold', None),
                     "action_space_type": getattr(self.config, '_action_space_type', 'continuous'),
+                    **_discrete_bins_kwarg(self.config),
                     "trades_log_path": str(Path(self.config.output_dir).resolve() / "trades.jsonl"),
                     "dashboard_fold": fold,
                 },
@@ -252,6 +267,37 @@ class QuickWFOTrainer:
         """
         total_timesteps = self.config.total_timesteps
 
+        # Phase 5: PPO hyperparameters are now CLI-tunable (clip_param,
+        # entropy_coeff + optional linear schedule, train_batch_size,
+        # sgd_minibatch_size, num_sgd_iter). Defaults preserve prior
+        # hardcoded values exactly. Build training kwargs as a dict so the
+        # entropy-schedule branch can swap entropy_coeff (constant) for
+        # entropy_coeff_schedule (linear) — RLlib treats these as mutually
+        # exclusive; passing both warns or errors depending on version.
+        training_kwargs: Dict[str, Any] = {
+            "gamma": self.config.gamma,
+            "lr": getattr(self.config, '_lr_actor', 3e-4),
+            "train_batch_size": getattr(self.config, '_ppo_train_batch_size', 4000),
+            "sgd_minibatch_size": getattr(self.config, '_ppo_sgd_minibatch_size', 128),
+            "num_sgd_iter": getattr(self.config, '_ppo_num_sgd_iter', 20),
+            "clip_param": getattr(self.config, '_ppo_clip_param', 0.3),
+            "vf_clip_param": 10.0,
+            "grad_clip": 1.0,
+            "model": {"fcnet_hiddens": [256, 256], "fcnet_activation": "relu"},
+        }
+        entropy_start = getattr(self.config, '_ppo_entropy_coeff', 0.01)
+        entropy_end = getattr(self.config, '_ppo_entropy_anneal_end', None)
+        if entropy_end is not None:
+            # Linear schedule from entropy_start to entropy_end across the
+            # full training horizon. Schedule is a list of [step, value]
+            # waypoints; RLlib linearly interpolates between them.
+            training_kwargs["entropy_coeff_schedule"] = [
+                [0, float(entropy_start)],
+                [int(total_timesteps), float(entropy_end)],
+            ]
+        else:
+            training_kwargs["entropy_coeff"] = entropy_start
+
         ppo_config = (
             PPOConfig()
             .environment(
@@ -272,23 +318,13 @@ class QuickWFOTrainer:
                     "entry_threshold": getattr(self.config, '_entry_threshold', None),
                     "cover_threshold": getattr(self.config, '_cover_threshold', None),
                     "action_space_type": getattr(self.config, '_action_space_type', 'continuous'),
+                    **_discrete_bins_kwarg(self.config),
                     "trades_log_path": str(Path(self.config.output_dir).resolve() / "trades.jsonl"),
                     "dashboard_fold": fold,
                 },
             )
             .framework("torch")
-            .training(
-                gamma=self.config.gamma,
-                lr=getattr(self.config, '_lr_actor', 3e-4),
-                train_batch_size=4000,
-                sgd_minibatch_size=128,
-                num_sgd_iter=20,
-                clip_param=0.3,
-                entropy_coeff=0.01,
-                vf_clip_param=10.0,
-                grad_clip=1.0,
-                model={"fcnet_hiddens": [256, 256], "fcnet_activation": "relu"},
-            )
+            .training(**training_kwargs)
             .rollouts(
                 num_rollout_workers=0,
                 rollout_fragment_length=200,
@@ -459,6 +495,10 @@ class QuickWFOTrainer:
             # would emit ints that the default continuous env clips to +1.0
             # and routes through _discretize_action — silently wrong eval.
             "action_space_type": getattr(self.config, '_action_space_type', 'continuous'),
+            # Mirror the training-time bin count so Discrete eval uses the
+            # same action space the policy was trained against. Omitted when
+            # the CLI didn't override — env falls back to its default (7).
+            **_discrete_bins_kwarg(self.config),
         }
 
         # PPO uses RLlib's default FullyConnectedNetwork, which expects a flat
@@ -481,6 +521,16 @@ class QuickWFOTrainer:
             except Exception as exc:
                 logger.warning(f"Could not build PPO obs preprocessor: {exc}")
                 preprocessor = None
+
+        # Phase 1.2: collect OOS action distribution + time-in-position
+        # diagnostics from get_episode_diagnostics() (added in Phase 1.1,
+        # env.py; renamed from get_episode_info in Phase 1.1 fix I1).
+        # The histogram is only populated for discrete action spaces; for
+        # continuous it's all zeros (the int-cast of a Box(-1,1) sample isn't
+        # a meaningful bin index). We still collect it uniformly here and
+        # gate the action_distribution computation on action_space_type
+        # below to avoid emitting a meaningless distribution for continuous.
+        action_space_type = getattr(self.config, '_action_space_type', 'continuous')
 
         episode_results = []
         for ep_idx, setup in enumerate(test_setups):
@@ -505,11 +555,15 @@ class QuickWFOTrainer:
                     obs, reward, done, truncated, info = eval_env.step(action)
                     step_count += 1
 
+                ep_info = eval_env.get_episode_diagnostics()
                 episode_results.append({
                     'symbol': setup['symbol'],
                     'date': setup['date'],
                     'pnl': eval_env.episode_pnl,
-                    'trades': eval_env.episode_trades,
+                    'trades': ep_info['n_trades'],
+                    'action_histogram': ep_info['action_histogram'],
+                    'mean_bars_in_position': ep_info['mean_bars_in_position'],
+                    'median_bars_in_position': ep_info['median_bars_in_position'],
                 })
             except Exception as e:
                 logger.warning(f"  Eval episode {setup['symbol']} {setup['date']} failed: {e}")
@@ -520,6 +574,53 @@ class QuickWFOTrainer:
         mean_episode_pnl = float(np.mean(pnls)) if pnls else 0.0
         winning = sum(1 for p in pnls if p > 0)
         episodes_evaluated = len(episode_results)
+
+        # Phase 1.2: aggregate OOS action distribution across all eval
+        # episodes in this fold. For continuous action spaces the histograms
+        # are all zeros (see env.get_episode_diagnostics docstring); we set
+        # action_distribution to None and document via a top-level note so
+        # downstream consumers don't mistake all-zeros for a degenerate
+        # distribution. The discrete-bins count is sourced from the
+        # eval_env_config (which the CLI override propagates into) and
+        # falls back to the EnvironmentConfig field default if not
+        # overridden. Phase 4 prep: switched from
+        # ``__dataclass_fields__[...].default`` (fragile — breaks if the
+        # field gains a default_factory) to a direct
+        # ``EnvironmentConfig().discrete_action_bins`` read.
+        # Probabilities sum to 1.0 exactly when total > 0 (integer counts
+        # divided by their sum); when total == 0 (no discrete actions ever
+        # taken, e.g. continuous mode) we emit None.
+        from src.rl.env import EnvironmentConfig as _EnvCfg
+        n_bins = eval_env_config.get(
+            'discrete_action_bins',
+            _EnvCfg().discrete_action_bins,
+        )
+        action_distribution: Optional[Dict[int, float]] = None
+        if action_space_type == 'discrete' and episode_results:
+            total_action_counts = {i: 0 for i in range(n_bins)}
+            for ep in episode_results:
+                for k, v in ep.get('action_histogram', {}).items():
+                    total_action_counts[int(k)] += int(v)
+            total = sum(total_action_counts.values())
+            if total > 0:
+                action_distribution = {
+                    i: total_action_counts[i] / total for i in range(n_bins)
+                }
+                dist_str = ", ".join(
+                    f"bin_{i}={action_distribution[i]:.3f}" for i in range(n_bins)
+                )
+                logger.info(f"oos_action_distribution fold={fold} {dist_str}")
+            else:
+                logger.warning(
+                    f"oos_action_distribution fold={fold}: zero discrete actions "
+                    f"recorded across {len(episode_results)} episodes"
+                )
+        else:
+            logger.info(
+                f"oos_action_distribution fold={fold}: skipped "
+                f"(action_space_type={action_space_type!r}, histogram is non-meaningful "
+                f"for continuous; n_episodes={len(episode_results)})"
+            )
 
         logger.info(f"\n{'='*70}")
         logger.info(f"TEST RESULTS FOR FOLD {fold} (True PnL)")
@@ -564,6 +665,9 @@ class QuickWFOTrainer:
             'best_checkpoint_timestep': best_checkpoint_timestep,
             'best_eval_reward': best_eval_reward if best_eval_reward != float('-inf') else None,
             'validation_checks': checks,
+            # Phase 1.2: per-fold OOS action distribution (None for continuous)
+            'action_distribution': action_distribution,
+            'action_space_type': action_space_type,
         }
 
         algo.stop()
@@ -841,71 +945,114 @@ class QuickWFOTrainer:
         logger.info(f"Requested: train={self.config.train_months}mo + test={self.config.test_months}mo "
                      f"+ purge={self.config.purge_days}d = {months_per_fold:.1f} months/fold")
 
-        if total_months_needed > available_months:
-            max_train = int(available_months - self.config.test_months - purge_months)
-            max_test = int(available_months - self.config.train_months - purge_months)
-            logger.error(
-                f"ERROR: Need {total_months_needed:.0f} months but only "
-                f"{available_months:.0f} months of data available!\n"
-                f"  Options:\n"
-                f"    - Max train_months for {self.config.test_months}mo test: {max(0, max_train)}\n"
-                f"    - Max test_months for {self.config.train_months}mo train: {max(0, max_test)}\n"
-                f"  Reduce train_months or test_months and retry."
-            )
-            sys.exit(2)  # Exit code 2 = param validation failure (distinct from crash=1)
+        # 2026-05-20 OOS methodology fix: when an explicit test window was
+        # given via --test-start-date/--test-end-date, skip the auto-anchor
+        # and build a single fold over the requested window. main() has
+        # already validated that both flags are set together and parseable.
+        explicit_test_start = getattr(self.config, '_test_start_date', None)
+        explicit_test_end = getattr(self.config, '_test_end_date', None)
 
-        # Anchor the window: end at data_max, start as late as possible
-        # This ensures the test window uses the most recent data
-        end_date = data_max
-        start_date = end_date - timedelta(days=30 * total_months_needed)
-        start_date = max(start_date, data_min)
+        if explicit_test_start is not None and explicit_test_end is not None:
+            test_start = datetime.strptime(explicit_test_start, "%Y-%m-%d")
+            test_end = datetime.strptime(explicit_test_end, "%Y-%m-%d")
+            # Train window ends purge_days before test_start, and spans
+            # train_months back from there. Uses the same 30-day/month
+            # convention as the auto-computed path below.
+            purge_end = test_start
+            purge_start = purge_end - timedelta(days=self.config.purge_days)
+            train_end = purge_start
+            train_start = train_end - timedelta(days=30 * self.config.train_months)
+            train_start = max(train_start, data_min)
 
-        logger.info(f"Computed window: {start_date.date()} → {end_date.date()}")
-
-        splitter = WalkForwardSplitter(
-            start_date=start_date,
-            end_date=end_date,
-            train_years=0,  # We'll override with months
-            test_months=self.config.test_months,
-            purge_days=self.config.purge_days,
-            step_months=self.config.test_months
-        )
-
-        # Build fold splits from computed window
-        splits = []
-        current_start = start_date
-
-        for i in range(self.config.n_folds):
-            train_start = current_start
-            train_end = train_start + timedelta(days=30 * self.config.train_months)
-
-            purge_start = train_end
-            purge_end = purge_start + timedelta(days=self.config.purge_days)
-
-            test_start = purge_end
-            test_end = test_start + timedelta(days=30 * self.config.test_months)
-
-            if test_end > end_date:
+            if self.config.n_folds != 1:
                 logger.warning(
-                    f"Fold {i+1} test window ({test_start.date()} → {test_end.date()}) "
-                    f"exceeds data end ({end_date.date()}). Skipping."
+                    f"Explicit --test-start-date/--test-end-date forces n_folds=1 "
+                    f"(was {self.config.n_folds}). Walk-forward stepping is incompatible "
+                    f"with a user-pinned single window."
                 )
-                break
 
-            logger.info(f"  Fold {len(splits)+1}: Train {train_start.date()} → {train_end.date()} | "
-                         f"Test {test_start.date()} → {test_end.date()}")
+            logger.info(f"Explicit window: train {train_start.date()} → {train_end.date()} | "
+                         f"test {test_start.date()} → {test_end.date()}")
 
-            splits.append({
+            splits = [{
                 'train_start': train_start,
                 'train_end': train_end,
                 'purge_start': purge_start,
                 'purge_end': purge_end,
                 'test_start': test_start,
                 'test_end': test_end,
-                'fold': len(splits) + 1
-            })
+                'fold': 1,
+            }]
 
-            current_start += timedelta(days=30 * self.config.test_months)
+            # Skip the auto-computed branch below; jump to the post-splits flow.
+            start_date = train_start
+            end_date = test_end
+        else:
+            if total_months_needed > available_months:
+                max_train = int(available_months - self.config.test_months - purge_months)
+                max_test = int(available_months - self.config.train_months - purge_months)
+                logger.error(
+                    f"ERROR: Need {total_months_needed:.0f} months but only "
+                    f"{available_months:.0f} months of data available!\n"
+                    f"  Options:\n"
+                    f"    - Max train_months for {self.config.test_months}mo test: {max(0, max_train)}\n"
+                    f"    - Max test_months for {self.config.train_months}mo train: {max(0, max_test)}\n"
+                    f"  Reduce train_months or test_months and retry."
+                )
+                sys.exit(2)  # Exit code 2 = param validation failure (distinct from crash=1)
+
+            # Anchor the window: end at data_max, start as late as possible
+            # This ensures the test window uses the most recent data
+            end_date = data_max
+            start_date = end_date - timedelta(days=30 * total_months_needed)
+            start_date = max(start_date, data_min)
+
+            logger.info(f"Computed window: {start_date.date()} → {end_date.date()}")
+
+            splitter = WalkForwardSplitter(
+                start_date=start_date,
+                end_date=end_date,
+                train_years=0,  # We'll override with months
+                test_months=self.config.test_months,
+                purge_days=self.config.purge_days,
+                step_months=self.config.test_months
+            )
+
+            # Build fold splits from computed window
+            splits = []
+            current_start = start_date
+
+            for i in range(self.config.n_folds):
+                train_start = current_start
+                train_end = train_start + timedelta(days=30 * self.config.train_months)
+
+                purge_start = train_end
+                purge_end = purge_start + timedelta(days=self.config.purge_days)
+
+                test_start = purge_end
+                test_end = test_start + timedelta(days=30 * self.config.test_months)
+
+                if test_end > end_date:
+                    logger.warning(
+                        f"Fold {i+1} test window ({test_start.date()} → {test_end.date()}) "
+                        f"exceeds data end ({end_date.date()}). Skipping."
+                    )
+                    break
+
+                logger.info(f"  Fold {len(splits)+1}: Train {train_start.date()} → {train_end.date()} | "
+                             f"Test {test_start.date()} → {test_end.date()}")
+
+                splits.append({
+                    'train_start': train_start,
+                    'train_end': train_end,
+                    'purge_start': purge_start,
+                    'purge_end': purge_end,
+                    'test_start': test_start,
+                    'test_end': test_end,
+                    'fold': len(splits) + 1
+                })
+
+                current_start += timedelta(days=30 * self.config.test_months)
 
         if not splits:
             logger.error(
@@ -977,21 +1124,88 @@ class QuickWFOTrainer:
             logger.error(f"Benchmark error: {e}", exc_info=True)
             benchmark_data = {'error': str(e)}
 
+        # Phase 1.2: aggregate OOS action distribution across ALL folds for
+        # the top-level JSON key. Each fold already aggregated its own
+        # per-episode histograms; we just merge the per-episode results
+        # again (re-summing fold totals would require either storing fold
+        # counts or a weighted average; re-summing from episode-level
+        # histograms is the simpler invariant — one path, one bug surface).
+        action_space_type = getattr(self.config, '_action_space_type', 'continuous')
+        top_action_distribution: Optional[Dict[int, float]] = None
+        if action_space_type == 'discrete' and all_results:
+            # Discover n_bins from the first fold that recorded a non-None
+            # distribution; fall back to any per-episode histogram key.
+            n_bins = None
+            for r in all_results:
+                if r.get('action_distribution'):
+                    n_bins = len(r['action_distribution'])
+                    break
+            if n_bins is None:
+                for r in all_results:
+                    for ep in r.get('per_episode_results', []):
+                        hist = ep.get('action_histogram', {})
+                        if hist:
+                            n_bins = len(hist)
+                            break
+                    if n_bins is not None:
+                        break
+
+            if n_bins:
+                total_counts = {i: 0 for i in range(n_bins)}
+                for r in all_results:
+                    for ep in r.get('per_episode_results', []):
+                        for k, v in ep.get('action_histogram', {}).items():
+                            total_counts[int(k)] += int(v)
+                total = sum(total_counts.values())
+                if total > 0:
+                    top_action_distribution = {
+                        i: total_counts[i] / total for i in range(n_bins)
+                    }
+                    dist_str = ", ".join(
+                        f"bin_{i}={top_action_distribution[i]:.3f}"
+                        for i in range(n_bins)
+                    )
+                    logger.info(f"oos_action_distribution (all folds): {dist_str}")
+
         # Save results
         results_path = Path(self.config.output_dir) / "quick_test_results.json"
+        algo_choice = getattr(self.config, '_algo', 'sac')
+        config_block: Dict[str, Any] = {
+            'train_months': self.config.train_months,
+            'test_months': self.config.test_months,
+            'warmup_timesteps': self.config.warmup_timesteps,
+            'finetune_timesteps': self.config.finetune_timesteps,
+            'action_space_type': action_space_type,
+            'algo': algo_choice,
+        }
+        # Phase 5: record actual PPO hyperparameters used (for reproducibility
+        # across sweep runs). Only emitted when algo == 'ppo' so SAC runs
+        # don't carry irrelevant fields. lr is sourced from the shared
+        # --lr-actor flag (which PPOConfig.training receives as `lr`).
+        if algo_choice == 'ppo':
+            config_block['ppo_hyperparameters'] = {
+                'clip_param': getattr(self.config, '_ppo_clip_param', 0.3),
+                'entropy_coeff': getattr(self.config, '_ppo_entropy_coeff', 0.01),
+                'entropy_anneal_end': getattr(self.config, '_ppo_entropy_anneal_end', None),
+                'train_batch_size': getattr(self.config, '_ppo_train_batch_size', 4000),
+                'sgd_minibatch_size': getattr(self.config, '_ppo_sgd_minibatch_size', 128),
+                'num_sgd_iter': getattr(self.config, '_ppo_num_sgd_iter', 20),
+                'lr': getattr(self.config, '_lr_actor', 3e-4),
+            }
         with open(results_path, 'w') as f:
             json.dump({
-                'config': {
-                    'train_months': self.config.train_months,
-                    'test_months': self.config.test_months,
-                    'warmup_timesteps': self.config.warmup_timesteps,
-                    'finetune_timesteps': self.config.finetune_timesteps,
-                },
+                'config': config_block,
                 'folds': all_results,
                 'aggregate': {
                     'avg_test_pnl': avg_pnl,
                     'total_eval_episodes': total_eval_episodes,
                 },
+                # Phase 1.2: top-level aggregated OOS action distribution
+                # (probabilities sum to 1.0 modulo float rounding). None when
+                # action_space_type != 'discrete' OR when no discrete actions
+                # were recorded — see per-fold 'action_distribution' for the
+                # fold-level breakdown.
+                'action_distribution': top_action_distribution,
                 'benchmarks': benchmark_data,
             }, f, indent=2, default=str)
         
@@ -1037,6 +1251,20 @@ def main():
     parser.add_argument('--purge-days', type=int, default=5)
     parser.add_argument('--n-folds', type=int, default=1,
                         help='Number of walk-forward folds (default: 1)')
+    # Explicit OOS window override (additive — when unset, the auto-computed
+    # window from --train-months/--test-months/--purge-days is used). Added
+    # for the 2026-05-20 OOS methodology fix that widens the test window from
+    # ~14 setups (1 month) to 50+ (3 months) — see
+    # docs/oos_methodology_fix_2026-05-20.md. Both flags must be set together;
+    # passing only one raises an error.
+    parser.add_argument('--test-start-date', type=str, default=None,
+                        help='Explicit OOS start date YYYY-MM-DD. Overrides '
+                             'auto-computed window. Must be set together with '
+                             '--test-end-date. Forces n_folds=1.')
+    parser.add_argument('--test-end-date', type=str, default=None,
+                        help='Explicit OOS end date YYYY-MM-DD. Overrides '
+                             'auto-computed window. Must be set together with '
+                             '--test-start-date. Forces n_folds=1.')
     # SAC hyperparams
     parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--buffer-size', type=int, default=50000)
@@ -1097,10 +1325,40 @@ def main():
         '--action-space', type=str, default='continuous',
         choices=['continuous', 'discrete'],
         help='Action space: continuous (default, Box(-1,1)) or discrete '
-             '(Discrete(7), bypasses _discretize_action). Designed for use '
+             '(Discrete(N), bypasses _discretize_action). Designed for use '
              'with --algo ppo. See docs/ppo_continuous_smoke_2026-05-19.md '
-             'for the motivation.',
+             'for the motivation. Bin count N is controlled by '
+             '--discrete-action-bins (default 7).',
     )
+    parser.add_argument(
+        '--discrete-action-bins', type=int, default=None,
+        choices=[3, 5, 7, 9, 11],
+        help='Number of discrete action bins. Must be in {3, 5, 7, 9, 11}. '
+             "Default: env's default (7). Only meaningful with "
+             '--action-space discrete. See EnvironmentConfig.discrete_action_bins '
+             'in src/rl/env.py for the bin-layout table. argparse rejects '
+             'unsupported values at parse time; the env re-validates as '
+             'defense-in-depth.',
+    )
+    # PPO hyperparameters (Phase 5: unblock GPU sweeps). Defaults preserve
+    # the prior hardcoded values exactly; --lr-actor (already defined above)
+    # propagates to PPOConfig.training(lr=...).
+    parser.add_argument('--ppo-clip-param', type=float, default=0.3,
+                        help='PPO clipped surrogate objective epsilon. RLlib default 0.3.')
+    parser.add_argument('--ppo-entropy-coeff', type=float, default=0.01,
+                        help='PPO entropy bonus coefficient (constant if --ppo-entropy-anneal-end '
+                             'is not set; otherwise linearly anneals from this value to that one '
+                             'over --total-steps).')
+    parser.add_argument('--ppo-entropy-anneal-end', type=float, default=None,
+                        help='If set, anneal entropy_coeff linearly from --ppo-entropy-coeff to '
+                             'this value over --total-steps. Uses entropy_coeff_schedule (mutually '
+                             'exclusive with entropy_coeff in RLlib).')
+    parser.add_argument('--ppo-train-batch-size', type=int, default=4000,
+                        help='PPO on-policy rollout batch size per training iteration.')
+    parser.add_argument('--ppo-sgd-minibatch-size', type=int, default=128,
+                        help='PPO SGD minibatch size used inside each epoch.')
+    parser.add_argument('--ppo-num-sgd-iter', type=int, default=20,
+                        help='PPO number of SGD epochs per training iteration.')
 
     args = parser.parse_args()
 
@@ -1111,6 +1369,28 @@ def main():
         parser.error("--algo sac is incompatible with --action-space discrete "
                      "(SAC's masked Gaussian model is built for Box actions). "
                      "Use --algo ppo for discrete experiments.")
+
+    # Explicit OOS window: both flags must be provided together. Passing only
+    # one is a user error (silently ignoring the half-set flag would mask
+    # bugs in sweep scripts).
+    if (args.test_start_date is None) != (args.test_end_date is None):
+        parser.error(
+            "--test-start-date and --test-end-date must be set together "
+            "(both or neither). Got "
+            f"test_start_date={args.test_start_date!r}, "
+            f"test_end_date={args.test_end_date!r}."
+        )
+    if args.test_start_date is not None:
+        try:
+            _ts = datetime.strptime(args.test_start_date, "%Y-%m-%d")
+            _te = datetime.strptime(args.test_end_date, "%Y-%m-%d")
+        except ValueError as e:
+            parser.error(f"--test-start-date/--test-end-date must be YYYY-MM-DD: {e}")
+        if _te <= _ts:
+            parser.error(
+                f"--test-end-date ({args.test_end_date}) must be after "
+                f"--test-start-date ({args.test_start_date})."
+            )
 
     # Reproducibility: seed every RNG that matters.
     import random as _stdlib_random
@@ -1159,6 +1439,25 @@ def main():
     config._cover_threshold = args.cover_threshold
     config._algo = args.algo
     config._action_space_type = args.action_space
+    # Phase 4 prep: optional bin-count override for the Discrete action space.
+    # None = use the EnvironmentConfig default (currently 7). Otherwise must
+    # be a value in {3, 5, 7, 9, 11} (argparse already enforces this).
+    config._discrete_action_bins = args.discrete_action_bins
+    # PPO hyperparameters (Phase 5 sweep surface). Stored on config so
+    # create_ppo_config() can read them at fold-build time. SAC ignores
+    # these (its create_sac_config() doesn't touch them).
+    config._ppo_clip_param = args.ppo_clip_param
+    config._ppo_entropy_coeff = args.ppo_entropy_coeff
+    config._ppo_entropy_anneal_end = args.ppo_entropy_anneal_end
+    config._ppo_train_batch_size = args.ppo_train_batch_size
+    config._ppo_sgd_minibatch_size = args.ppo_sgd_minibatch_size
+    config._ppo_num_sgd_iter = args.ppo_num_sgd_iter
+    # 2026-05-20 OOS methodology fix: explicit test-window override. When set,
+    # bypasses _detect_data_range anchoring and forces a single fold over the
+    # user-specified window. Validation already ensured both flags are set
+    # together and parseable above.
+    config._test_start_date = args.test_start_date
+    config._test_end_date = args.test_end_date
 
     trainer = QuickWFOTrainer(config)
     results = trainer.run()

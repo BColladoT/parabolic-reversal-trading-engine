@@ -1,0 +1,513 @@
+{
+  "generated_at": "2026-05-20T21:40:17.261258",
+  "comparison_methodology": "Same test setups, same execution/accounting",
+  "sizing_modes_compared": [
+    "fixed_shares",
+    "fixed_fraction_of_equity"
+  ],
+  "per_fold": [
+    {
+      "fold": 1,
+      "test_window": {
+        "start": "2024-11-30T00:00:00",
+        "end": "2024-12-30T00:00:00"
+      },
+      "rl_metrics": {
+        "total_test_pnl": -1648.7612573968072,
+        "mean_episode_pnl": -117.76866124262908,
+        "win_rate": 0.21428571428571427,
+        "total_trades": 13,
+        "mean_trades_per_episode": 0.9285714285714286
+      },
+      "vs_fixed_shares": {
+        "rl_total_pnl": -1648.7612573968072,
+        "rule_total_pnl": -2160.189902625847,
+        "pnl_difference": 511.42864522903983,
+        "pnl_improvement_pct": 23.675170623071892,
+        "pnl_ratio": 0.763248293769281,
+        "rl_win_rate": 0.21428571428571427,
+        "rule_win_rate": 0.35714285714285715,
+        "rl_mean_pnl": -117.76866124262908,
+        "rule_mean_pnl": -154.29927875898906,
+        "rl_total_trades": 13,
+        "rule_total_trades": 13,
+        "rl_avg_trades_per_ep": 0.9285714285714286,
+        "rule_avg_trades_per_ep": 0.9285714285714286,
+        "verdict": "PASS",
+        "verdict_reason": "RL beats rule by 23.7% (>= 10% threshold)"
+      },
+      "vs_fraction_of_equity": {
+        "rl_total_pnl": -1648.7612573968072,
+        "rule_total_pnl": -2160.189902625847,
+        "pnl_difference": 511.42864522903983,
+        "pnl_improvement_pct": 23.675170623071892,
+        "pnl_ratio": 0.763248293769281,
+        "rl_win_rate": 0.21428571428571427,
+        "rule_win_rate": 0.35714285714285715,
+        "rl_mean_pnl": -117.76866124262908,
+        "rule_mean_pnl": -154.29927875898906,
+        "rl_total_trades": 13,
+        "rule_total_trades": 13,
+        "rl_avg_trades_per_ep": 0.9285714285714286,
+        "rule_avg_trades_per_ep": 0.9285714285714286,
+        "verdict": "PASS",
+        "verdict_reason": "RL beats rule by 23.7% (>= 10% threshold)"
+      }
+    }
+  ],
+  "aggregate": {
+    "total_folds": 1,
+    "vs_fixed_shares": {
+      "pass_count": 1,
+      "marginal_count": 0,
+      "fail_count": 0,
+      "overall_verdict": "PASS"
+    },
+    "vs_fraction_of_equity": {
+      "pass_count": 1,
+      "marginal_count": 0,
+      "fail_count": 0,
+      "overall_verdict": "PASS"
+    }
+  },
+  "final_conclusion": "RL PASSES - demonstrates clear value over rule baseline",
+  "summary_fixed_shares": {
+    "sizing_mode": "fixed_shares",
+    "n_setups": 14,
+    "test_window": {
+      "start": "2024-11-30T00:00:00",
+      "end": "2024-12-30T00:00:00"
+    },
+    "setup_list": [
+      {
+        "symbol": "PRFX",
+        "date": "2024-12-19"
+      },
+      {
+        "symbol": "SES",
+        "date": "2024-12-26"
+      },
+      {
+        "symbol": "GGRP",
+        "date": "2024-12-18"
+      },
+      {
+        "symbol": "PLRZ",
+        "date": "2024-12-18"
+      },
+      {
+        "symbol": "INTZ",
+        "date": "2024-12-30"
+      },
+      {
+        "symbol": "BAOS",
+        "date": "2024-12-24"
+      },
+      {
+        "symbol": "DFNS",
+        "date": "2024-12-17"
+      },
+      {
+        "symbol": "GXAI",
+        "date": "2024-12-06"
+      },
+      {
+        "symbol": "CTEV",
+        "date": "2024-12-24"
+      },
+      {
+        "symbol": "GXAI",
+        "date": "2024-12-10"
+      },
+      {
+        "symbol": "WKEY",
+        "date": "2024-12-13"
+      },
+      {
+        "symbol": "PPBT",
+        "date": "2024-12-02"
+      },
+      {
+        "symbol": "SNTI",
+        "date": "2024-12-02"
+      },
+      {
+        "symbol": "HOUR",
+        "date": "2024-12-24"
+      }
+    ],
+    "rl": {
+      "n_seeds": 3,
+      "total_test_pnl": -1609.580389059464,
+      "total_test_pnl_per_seed": [
+        -1648.7612573968072,
+        -1900.7384599091893,
+        -1279.2414498723956
+      ],
+      "total_test_pnl_std_across_seeds": 312.59556731329343,
+      "win_rate": 0.21428571428571427,
+      "win_rate_per_seed": [
+        0.21428571428571427,
+        0.21428571428571427,
+        0.21428571428571427
+      ],
+      "mean_per_setup_pnls": [
+        -72.84093504641594,
+        -35.347873226812226,
+        -7.92483064175273,
+        0.0,
+        46.84401116432855,
+        2.5361605886767697,
+        -816.5704847987508,
+        39.64031335427717,
+        -146.99744989488195,
+        -26.551134725523298,
+        -156.17152594675522,
+        -221.98628668363867,
+        -56.00240964673382,
+        -158.20794355548182
+      ]
+    },
+    "rule_baseline": {
+      "total_test_pnl": -2160.189902625847,
+      "mean_episode_pnl": -154.29927875898906,
+      "win_rate": 0.35714285714285715,
+      "total_trades": 13,
+      "mean_trades_per_episode": 0.9285714285714286,
+      "mean_winner": 51.182592170487624,
+      "mean_loser": -302.01285793478564,
+      "n_winners": 5,
+      "n_losers": 8,
+      "n_zero_pnl": 1,
+      "per_setup_pnls": [
+        73.34246575343423,
+        2.1874564459867543,
+        -23.839436619717162,
+        0.0,
+        134.34226610249607,
+        -236.375,
+        -1330.1036544850504,
+        20.77931034482026,
+        -310.9242424242402,
+        25.26146220570081,
+        -158.4304461942229,
+        -214.65284423177945,
+        -37.37101114956022,
+        -104.40622837371484
+      ],
+      "per_episode_results": [
+        {
+          "symbol": "PRFX",
+          "date": "2024-12-19",
+          "pnl": 73.34246575343423,
+          "trades": 1
+        },
+        {
+          "symbol": "SES",
+          "date": "2024-12-26",
+          "pnl": 2.1874564459867543,
+          "trades": 1
+        },
+        {
+          "symbol": "GGRP",
+          "date": "2024-12-18",
+          "pnl": -23.839436619717162,
+          "trades": 1
+        },
+        {
+          "symbol": "PLRZ",
+          "date": "2024-12-18",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "INTZ",
+          "date": "2024-12-30",
+          "pnl": 134.34226610249607,
+          "trades": 1
+        },
+        {
+          "symbol": "BAOS",
+          "date": "2024-12-24",
+          "pnl": -236.375,
+          "trades": 1
+        },
+        {
+          "symbol": "DFNS",
+          "date": "2024-12-17",
+          "pnl": -1330.1036544850504,
+          "trades": 1
+        },
+        {
+          "symbol": "GXAI",
+          "date": "2024-12-06",
+          "pnl": 20.77931034482026,
+          "trades": 1
+        },
+        {
+          "symbol": "CTEV",
+          "date": "2024-12-24",
+          "pnl": -310.9242424242402,
+          "trades": 1
+        },
+        {
+          "symbol": "GXAI",
+          "date": "2024-12-10",
+          "pnl": 25.26146220570081,
+          "trades": 1
+        },
+        {
+          "symbol": "WKEY",
+          "date": "2024-12-13",
+          "pnl": -158.4304461942229,
+          "trades": 1
+        },
+        {
+          "symbol": "PPBT",
+          "date": "2024-12-02",
+          "pnl": -214.65284423177945,
+          "trades": 1
+        },
+        {
+          "symbol": "SNTI",
+          "date": "2024-12-02",
+          "pnl": -37.37101114956022,
+          "trades": 1
+        },
+        {
+          "symbol": "HOUR",
+          "date": "2024-12-24",
+          "pnl": -104.40622837371484,
+          "trades": 1
+        }
+      ]
+    },
+    "delta": {
+      "rule_minus_rl_total_pnl": -550.6095135663829,
+      "rule_beats_rl": false,
+      "rl_minus_rule_total_pnl": 550.6095135663829
+    }
+  },
+  "summary_fraction_of_equity": {
+    "sizing_mode": "fixed_fraction_of_equity",
+    "n_setups": 14,
+    "test_window": {
+      "start": "2024-11-30T00:00:00",
+      "end": "2024-12-30T00:00:00"
+    },
+    "setup_list": [
+      {
+        "symbol": "PRFX",
+        "date": "2024-12-19"
+      },
+      {
+        "symbol": "SES",
+        "date": "2024-12-26"
+      },
+      {
+        "symbol": "GGRP",
+        "date": "2024-12-18"
+      },
+      {
+        "symbol": "PLRZ",
+        "date": "2024-12-18"
+      },
+      {
+        "symbol": "INTZ",
+        "date": "2024-12-30"
+      },
+      {
+        "symbol": "BAOS",
+        "date": "2024-12-24"
+      },
+      {
+        "symbol": "DFNS",
+        "date": "2024-12-17"
+      },
+      {
+        "symbol": "GXAI",
+        "date": "2024-12-06"
+      },
+      {
+        "symbol": "CTEV",
+        "date": "2024-12-24"
+      },
+      {
+        "symbol": "GXAI",
+        "date": "2024-12-10"
+      },
+      {
+        "symbol": "WKEY",
+        "date": "2024-12-13"
+      },
+      {
+        "symbol": "PPBT",
+        "date": "2024-12-02"
+      },
+      {
+        "symbol": "SNTI",
+        "date": "2024-12-02"
+      },
+      {
+        "symbol": "HOUR",
+        "date": "2024-12-24"
+      }
+    ],
+    "rl": {
+      "n_seeds": 3,
+      "total_test_pnl": -1609.580389059464,
+      "total_test_pnl_per_seed": [
+        -1648.7612573968072,
+        -1900.7384599091893,
+        -1279.2414498723956
+      ],
+      "total_test_pnl_std_across_seeds": 312.59556731329343,
+      "win_rate": 0.21428571428571427,
+      "win_rate_per_seed": [
+        0.21428571428571427,
+        0.21428571428571427,
+        0.21428571428571427
+      ],
+      "mean_per_setup_pnls": [
+        -72.84093504641594,
+        -35.347873226812226,
+        -7.92483064175273,
+        0.0,
+        46.84401116432855,
+        2.5361605886767697,
+        -816.5704847987508,
+        39.64031335427717,
+        -146.99744989488195,
+        -26.551134725523298,
+        -156.17152594675522,
+        -221.98628668363867,
+        -56.00240964673382,
+        -158.20794355548182
+      ]
+    },
+    "rule_baseline": {
+      "total_test_pnl": -2160.189902625847,
+      "mean_episode_pnl": -154.29927875898906,
+      "win_rate": 0.35714285714285715,
+      "total_trades": 13,
+      "mean_trades_per_episode": 0.9285714285714286,
+      "mean_winner": 51.182592170487624,
+      "mean_loser": -302.01285793478564,
+      "n_winners": 5,
+      "n_losers": 8,
+      "n_zero_pnl": 1,
+      "per_setup_pnls": [
+        73.34246575343423,
+        2.1874564459867543,
+        -23.839436619717162,
+        0.0,
+        134.34226610249607,
+        -236.375,
+        -1330.1036544850504,
+        20.77931034482026,
+        -310.9242424242402,
+        25.26146220570081,
+        -158.4304461942229,
+        -214.65284423177945,
+        -37.37101114956022,
+        -104.40622837371484
+      ],
+      "per_episode_results": [
+        {
+          "symbol": "PRFX",
+          "date": "2024-12-19",
+          "pnl": 73.34246575343423,
+          "trades": 1
+        },
+        {
+          "symbol": "SES",
+          "date": "2024-12-26",
+          "pnl": 2.1874564459867543,
+          "trades": 1
+        },
+        {
+          "symbol": "GGRP",
+          "date": "2024-12-18",
+          "pnl": -23.839436619717162,
+          "trades": 1
+        },
+        {
+          "symbol": "PLRZ",
+          "date": "2024-12-18",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "INTZ",
+          "date": "2024-12-30",
+          "pnl": 134.34226610249607,
+          "trades": 1
+        },
+        {
+          "symbol": "BAOS",
+          "date": "2024-12-24",
+          "pnl": -236.375,
+          "trades": 1
+        },
+        {
+          "symbol": "DFNS",
+          "date": "2024-12-17",
+          "pnl": -1330.1036544850504,
+          "trades": 1
+        },
+        {
+          "symbol": "GXAI",
+          "date": "2024-12-06",
+          "pnl": 20.77931034482026,
+          "trades": 1
+        },
+        {
+          "symbol": "CTEV",
+          "date": "2024-12-24",
+          "pnl": -310.9242424242402,
+          "trades": 1
+        },
+        {
+          "symbol": "GXAI",
+          "date": "2024-12-10",
+          "pnl": 25.26146220570081,
+          "trades": 1
+        },
+        {
+          "symbol": "WKEY",
+          "date": "2024-12-13",
+          "pnl": -158.4304461942229,
+          "trades": 1
+        },
+        {
+          "symbol": "PPBT",
+          "date": "2024-12-02",
+          "pnl": -214.65284423177945,
+          "trades": 1
+        },
+        {
+          "symbol": "SNTI",
+          "date": "2024-12-02",
+          "pnl": -37.37101114956022,
+          "trades": 1
+        },
+        {
+          "symbol": "HOUR",
+          "date": "2024-12-24",
+          "pnl": -104.40622837371484,
+          "trades": 1
+        }
+      ]
+    },
+    "delta": {
+      "rule_minus_rl_total_pnl": -550.6095135663829,
+      "rule_beats_rl": false,
+      "rl_minus_rule_total_pnl": 550.6095135663829
+    }
+  },
+  "rl_results_paths": [
+    "C:\\quant_trading\\models\\ppo_discrete_test\\w0.00_s1\\quick_test_results.json",
+    "C:\\quant_trading\\models\\ppo_discrete_test\\w0.00_s2\\quick_test_results.json",
+    "C:\\quant_trading\\models\\ppo_discrete_test\\w0.00_s3\\quick_test_results.json"
+  ]
+}
