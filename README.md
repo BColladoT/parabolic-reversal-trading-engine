@@ -8,6 +8,15 @@
 
 A Python-based intraday trading system that systematically short-sells micro-cap US equities exhibiting parabolic blow-off tops. Combines a production rules engine (validated in backtest) with a reinforcement learning position-sizing layer (in development).
 
+> ### 🔗 This system has a dedicated analytics layer — also built by me
+>
+> The market data this engine produces is modeled into a **dbt + BigQuery** analytics pipeline —
+> staging → intermediate → marts, with data-quality tests and a documented lineage graph:
+> **[equities-dbt-bigquery →](https://github.com/BColladoT/equities-dbt-bigquery)**
+>
+> Two repos, one end-to-end system by the same author: this engine generates the data;
+> that project turns it into tested, analysis-ready models.
+
 ## Thesis
 
 Low-float micro-cap stocks gaining 60–500% intraday on retail momentum exhibit predictable mean-reversion to VWAP once volume exhausts. The system identifies these extensions, shorts them, and exits at defined targets — purely intraday, all positions flat by 15:25 ET.
