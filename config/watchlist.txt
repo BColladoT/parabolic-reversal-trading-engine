@@ -1,0 +1,13 @@
+# Live engine watchlist — top 10 by 2024+ parabolic-winner frequency.
+# Alpaca IEX free tier caps total channel-subscriptions at ~30.
+# 10 symbols * 3 channels (trades+quotes+bars) = 30 = limit.
+PDYN
+RVSN
+GOVX
+INDO
+HOLO
+ANVS
+FFAI
+SIDU
+CTNT
+XHG

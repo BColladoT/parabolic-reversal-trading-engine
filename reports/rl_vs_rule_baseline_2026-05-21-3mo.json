@@ -1,0 +1,1377 @@
+{
+  "generated_at": "2026-05-21T09:22:41.811295",
+  "comparison_methodology": "Same test setups, same execution/accounting",
+  "sizing_modes_compared": [
+    "fixed_shares",
+    "fixed_fraction_of_equity"
+  ],
+  "per_fold": [
+    {
+      "fold": 1,
+      "test_window": {
+        "start": "2024-10-01T00:00:00",
+        "end": "2024-12-30T00:00:00"
+      },
+      "rl_metrics": {
+        "total_test_pnl": 1979.7168518964172,
+        "mean_episode_pnl": 39.59433703792834,
+        "win_rate": 0.4,
+        "total_trades": 0,
+        "mean_trades_per_episode": 0.0
+      },
+      "vs_fixed_shares": {
+        "rl_total_pnl": 1979.7168518964172,
+        "rule_total_pnl": 1665.8377385490312,
+        "pnl_difference": 313.879113347386,
+        "pnl_improvement_pct": 18.842118057715467,
+        "pnl_ratio": 1.1884211805771547,
+        "rl_win_rate": 0.4,
+        "rule_win_rate": 0.18,
+        "rl_mean_pnl": 39.59433703792834,
+        "rule_mean_pnl": 33.31675477098062,
+        "rl_total_trades": 0,
+        "rule_total_trades": 15,
+        "rl_avg_trades_per_ep": 0.0,
+        "rule_avg_trades_per_ep": 0.3,
+        "verdict": "PASS",
+        "verdict_reason": "RL beats rule by 18.8% (>= 10% threshold)"
+      },
+      "vs_fraction_of_equity": {
+        "rl_total_pnl": 1979.7168518964172,
+        "rule_total_pnl": 1665.8377385490312,
+        "pnl_difference": 313.879113347386,
+        "pnl_improvement_pct": 18.842118057715467,
+        "pnl_ratio": 1.1884211805771547,
+        "rl_win_rate": 0.4,
+        "rule_win_rate": 0.18,
+        "rl_mean_pnl": 39.59433703792834,
+        "rule_mean_pnl": 33.31675477098062,
+        "rl_total_trades": 0,
+        "rule_total_trades": 15,
+        "rl_avg_trades_per_ep": 0.0,
+        "rule_avg_trades_per_ep": 0.3,
+        "verdict": "PASS",
+        "verdict_reason": "RL beats rule by 18.8% (>= 10% threshold)"
+      }
+    }
+  ],
+  "aggregate": {
+    "total_folds": 1,
+    "vs_fixed_shares": {
+      "pass_count": 1,
+      "marginal_count": 0,
+      "fail_count": 0,
+      "overall_verdict": "PASS"
+    },
+    "vs_fraction_of_equity": {
+      "pass_count": 1,
+      "marginal_count": 0,
+      "fail_count": 0,
+      "overall_verdict": "PASS"
+    }
+  },
+  "final_conclusion": "RL PASSES - demonstrates clear value over rule baseline",
+  "summary_fixed_shares": {
+    "sizing_mode": "fixed_shares",
+    "n_setups": 50,
+    "test_window": {
+      "start": "2024-10-01T00:00:00",
+      "end": "2024-12-30T00:00:00"
+    },
+    "setup_list": [
+      {
+        "symbol": "JDZG",
+        "date": "2024-12-30"
+      },
+      {
+        "symbol": "UAMY",
+        "date": "2024-12-05"
+      },
+      {
+        "symbol": "TOVX",
+        "date": "2024-12-24"
+      },
+      {
+        "symbol": "TIVC",
+        "date": "2024-11-08"
+      },
+      {
+        "symbol": "QBTS",
+        "date": "2024-11-22"
+      },
+      {
+        "symbol": "CCTG",
+        "date": "2024-10-24"
+      },
+      {
+        "symbol": "QBTS",
+        "date": "2024-12-19"
+      },
+      {
+        "symbol": "SOS",
+        "date": "2024-11-27"
+      },
+      {
+        "symbol": "HRTX",
+        "date": "2024-12-03"
+      },
+      {
+        "symbol": "FATE",
+        "date": "2024-11-18"
+      },
+      {
+        "symbol": "VCIG",
+        "date": "2024-12-02"
+      },
+      {
+        "symbol": "MOBX",
+        "date": "2024-12-02"
+      },
+      {
+        "symbol": "SPRC",
+        "date": "2024-12-26"
+      },
+      {
+        "symbol": "RYM",
+        "date": "2024-11-14"
+      },
+      {
+        "symbol": "DUO",
+        "date": "2024-12-11"
+      },
+      {
+        "symbol": "NVNI",
+        "date": "2024-12-19"
+      },
+      {
+        "symbol": "ADGM",
+        "date": "2024-11-14"
+      },
+      {
+        "symbol": "PYXS",
+        "date": "2024-11-20"
+      },
+      {
+        "symbol": "ORKT",
+        "date": "2024-10-24"
+      },
+      {
+        "symbol": "PULM",
+        "date": "2024-11-14"
+      },
+      {
+        "symbol": "WKEY",
+        "date": "2024-12-13"
+      },
+      {
+        "symbol": "HUMA",
+        "date": "2024-12-20"
+      },
+      {
+        "symbol": "NIXX",
+        "date": "2024-10-17"
+      },
+      {
+        "symbol": "CNEY",
+        "date": "2024-12-04"
+      },
+      {
+        "symbol": "HELP",
+        "date": "2024-11-18"
+      },
+      {
+        "symbol": "CNTN",
+        "date": "2024-10-30"
+      },
+      {
+        "symbol": "MYSE",
+        "date": "2024-11-06"
+      },
+      {
+        "symbol": "BTCS",
+        "date": "2024-11-13"
+      },
+      {
+        "symbol": "TAOP",
+        "date": "2024-12-20"
+      },
+      {
+        "symbol": "SUNE",
+        "date": "2024-10-18"
+      },
+      {
+        "symbol": "LICN",
+        "date": "2024-12-06"
+      },
+      {
+        "symbol": "LICN",
+        "date": "2024-12-26"
+      },
+      {
+        "symbol": "MAXN",
+        "date": "2024-10-30"
+      },
+      {
+        "symbol": "LXEO",
+        "date": "2024-11-13"
+      },
+      {
+        "symbol": "UCL",
+        "date": "2024-12-18"
+      },
+      {
+        "symbol": "PRFX",
+        "date": "2024-12-19"
+      },
+      {
+        "symbol": "TVRD",
+        "date": "2024-12-20"
+      },
+      {
+        "symbol": "VSEE",
+        "date": "2024-10-21"
+      },
+      {
+        "symbol": "LTBR",
+        "date": "2024-10-29"
+      },
+      {
+        "symbol": "LRMR",
+        "date": "2024-12-16"
+      },
+      {
+        "symbol": "KITT",
+        "date": "2024-12-26"
+      },
+      {
+        "symbol": "CTEV",
+        "date": "2024-12-27"
+      },
+      {
+        "symbol": "TIVC",
+        "date": "2024-12-24"
+      },
+      {
+        "symbol": "NXL",
+        "date": "2024-11-11"
+      },
+      {
+        "symbol": "NCI",
+        "date": "2024-10-02"
+      },
+      {
+        "symbol": "INTZ",
+        "date": "2024-12-30"
+      },
+      {
+        "symbol": "STEM",
+        "date": "2024-12-30"
+      },
+      {
+        "symbol": "CANG",
+        "date": "2024-12-19"
+      },
+      {
+        "symbol": "RZLV",
+        "date": "2024-11-20"
+      },
+      {
+        "symbol": "AMBO",
+        "date": "2024-12-27"
+      }
+    ],
+    "rl": {
+      "n_seeds": 3,
+      "total_test_pnl": 1957.838926975368,
+      "total_test_pnl_per_seed": [
+        1979.7168518964172,
+        1914.0830771332694,
+        1979.7168518964172
+      ],
+      "total_test_pnl_std_across_seeds": 37.893677527434654,
+      "win_rate": 0.4000000000000001,
+      "win_rate_per_seed": [
+        0.4,
+        0.4,
+        0.4
+      ],
+      "mean_per_setup_pnls": [
+        38.82679860938515,
+        6.192452830189723,
+        8.153370067098876,
+        0.0,
+        -5.555317827092949,
+        0.0,
+        0.0,
+        605.920877246157,
+        0.0,
+        0.0,
+        137.94461923062045,
+        0.0,
+        0.0,
+        25.83268446843431,
+        3.2390804597671377,
+        -443.0162674498861,
+        -24.02472336203209,
+        0.0,
+        20.89325117370754,
+        174.84881531618885,
+        -311.73298180855636,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        102.11539599903335,
+        0.0,
+        414.5991191046487,
+        -25.969960086396895,
+        0.0,
+        190.221689944432,
+        643.9567004019482,
+        10.362731609144248,
+        231.46827633345674,
+        11.675259854804608,
+        19.87244094487687,
+        58.61780929866654,
+        -9.060435663617682,
+        0.0,
+        2.1912235338968458,
+        0.0,
+        0.0,
+        0.0,
+        70.26601674649282,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "rule_baseline": {
+      "total_test_pnl": 1665.8377385490312,
+      "mean_episode_pnl": 33.31675477098062,
+      "win_rate": 0.18,
+      "total_trades": 15,
+      "mean_trades_per_episode": 0.3,
+      "mean_winner": 296.8224015126519,
+      "mean_loser": -167.59397917747265,
+      "n_winners": 9,
+      "n_losers": 6,
+      "n_zero_pnl": 35,
+      "per_setup_pnls": [
+        71.57125382262166,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        611.5051688490639,
+        0.0,
+        0.0,
+        135.75198329854175,
+        0.0,
+        0.0,
+        677.2622095779952,
+        0.0,
+        -797.1811965812085,
+        -21.83037249284098,
+        0.0,
+        0.0,
+        211.0987292277714,
+        -158.4304461942229,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        140.49363867685315,
+        0.0,
+        616.0338983050897,
+        -5.225000000005821,
+        0.0,
+        0.0,
+        0.0,
+        -14.13383458647877,
+        73.34246575343423,
+        0.0,
+        0.0,
+        0.0,
+        -8.763025210078922,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        134.34226610249607,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "per_episode_results": [
+        {
+          "symbol": "JDZG",
+          "date": "2024-12-30",
+          "pnl": 71.57125382262166,
+          "trades": 1
+        },
+        {
+          "symbol": "UAMY",
+          "date": "2024-12-05",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "TOVX",
+          "date": "2024-12-24",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "TIVC",
+          "date": "2024-11-08",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "QBTS",
+          "date": "2024-11-22",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "CCTG",
+          "date": "2024-10-24",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "QBTS",
+          "date": "2024-12-19",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "SOS",
+          "date": "2024-11-27",
+          "pnl": 611.5051688490639,
+          "trades": 1
+        },
+        {
+          "symbol": "HRTX",
+          "date": "2024-12-03",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "FATE",
+          "date": "2024-11-18",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "VCIG",
+          "date": "2024-12-02",
+          "pnl": 135.75198329854175,
+          "trades": 1
+        },
+        {
+          "symbol": "MOBX",
+          "date": "2024-12-02",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "SPRC",
+          "date": "2024-12-26",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "RYM",
+          "date": "2024-11-14",
+          "pnl": 677.2622095779952,
+          "trades": 1
+        },
+        {
+          "symbol": "DUO",
+          "date": "2024-12-11",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "NVNI",
+          "date": "2024-12-19",
+          "pnl": -797.1811965812085,
+          "trades": 1
+        },
+        {
+          "symbol": "ADGM",
+          "date": "2024-11-14",
+          "pnl": -21.83037249284098,
+          "trades": 1
+        },
+        {
+          "symbol": "PYXS",
+          "date": "2024-11-20",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "ORKT",
+          "date": "2024-10-24",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "PULM",
+          "date": "2024-11-14",
+          "pnl": 211.0987292277714,
+          "trades": 1
+        },
+        {
+          "symbol": "WKEY",
+          "date": "2024-12-13",
+          "pnl": -158.4304461942229,
+          "trades": 1
+        },
+        {
+          "symbol": "HUMA",
+          "date": "2024-12-20",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "NIXX",
+          "date": "2024-10-17",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "CNEY",
+          "date": "2024-12-04",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "HELP",
+          "date": "2024-11-18",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "CNTN",
+          "date": "2024-10-30",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "MYSE",
+          "date": "2024-11-06",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "BTCS",
+          "date": "2024-11-13",
+          "pnl": 140.49363867685315,
+          "trades": 1
+        },
+        {
+          "symbol": "TAOP",
+          "date": "2024-12-20",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "SUNE",
+          "date": "2024-10-18",
+          "pnl": 616.0338983050897,
+          "trades": 1
+        },
+        {
+          "symbol": "LICN",
+          "date": "2024-12-06",
+          "pnl": -5.225000000005821,
+          "trades": 1
+        },
+        {
+          "symbol": "LICN",
+          "date": "2024-12-26",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "MAXN",
+          "date": "2024-10-30",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "LXEO",
+          "date": "2024-11-13",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "UCL",
+          "date": "2024-12-18",
+          "pnl": -14.13383458647877,
+          "trades": 1
+        },
+        {
+          "symbol": "PRFX",
+          "date": "2024-12-19",
+          "pnl": 73.34246575343423,
+          "trades": 1
+        },
+        {
+          "symbol": "TVRD",
+          "date": "2024-12-20",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "VSEE",
+          "date": "2024-10-21",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "LTBR",
+          "date": "2024-10-29",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "LRMR",
+          "date": "2024-12-16",
+          "pnl": -8.763025210078922,
+          "trades": 1
+        },
+        {
+          "symbol": "KITT",
+          "date": "2024-12-26",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "CTEV",
+          "date": "2024-12-27",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "TIVC",
+          "date": "2024-12-24",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "NXL",
+          "date": "2024-11-11",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "NCI",
+          "date": "2024-10-02",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "INTZ",
+          "date": "2024-12-30",
+          "pnl": 134.34226610249607,
+          "trades": 1
+        },
+        {
+          "symbol": "STEM",
+          "date": "2024-12-30",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "CANG",
+          "date": "2024-12-19",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "RZLV",
+          "date": "2024-11-20",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "AMBO",
+          "date": "2024-12-27",
+          "pnl": 0.0,
+          "trades": 0
+        }
+      ]
+    },
+    "delta": {
+      "rule_minus_rl_total_pnl": -292.00118842633674,
+      "rule_beats_rl": false,
+      "rl_minus_rule_total_pnl": 292.00118842633674
+    }
+  },
+  "summary_fraction_of_equity": {
+    "sizing_mode": "fixed_fraction_of_equity",
+    "n_setups": 50,
+    "test_window": {
+      "start": "2024-10-01T00:00:00",
+      "end": "2024-12-30T00:00:00"
+    },
+    "setup_list": [
+      {
+        "symbol": "JDZG",
+        "date": "2024-12-30"
+      },
+      {
+        "symbol": "UAMY",
+        "date": "2024-12-05"
+      },
+      {
+        "symbol": "TOVX",
+        "date": "2024-12-24"
+      },
+      {
+        "symbol": "TIVC",
+        "date": "2024-11-08"
+      },
+      {
+        "symbol": "QBTS",
+        "date": "2024-11-22"
+      },
+      {
+        "symbol": "CCTG",
+        "date": "2024-10-24"
+      },
+      {
+        "symbol": "QBTS",
+        "date": "2024-12-19"
+      },
+      {
+        "symbol": "SOS",
+        "date": "2024-11-27"
+      },
+      {
+        "symbol": "HRTX",
+        "date": "2024-12-03"
+      },
+      {
+        "symbol": "FATE",
+        "date": "2024-11-18"
+      },
+      {
+        "symbol": "VCIG",
+        "date": "2024-12-02"
+      },
+      {
+        "symbol": "MOBX",
+        "date": "2024-12-02"
+      },
+      {
+        "symbol": "SPRC",
+        "date": "2024-12-26"
+      },
+      {
+        "symbol": "RYM",
+        "date": "2024-11-14"
+      },
+      {
+        "symbol": "DUO",
+        "date": "2024-12-11"
+      },
+      {
+        "symbol": "NVNI",
+        "date": "2024-12-19"
+      },
+      {
+        "symbol": "ADGM",
+        "date": "2024-11-14"
+      },
+      {
+        "symbol": "PYXS",
+        "date": "2024-11-20"
+      },
+      {
+        "symbol": "ORKT",
+        "date": "2024-10-24"
+      },
+      {
+        "symbol": "PULM",
+        "date": "2024-11-14"
+      },
+      {
+        "symbol": "WKEY",
+        "date": "2024-12-13"
+      },
+      {
+        "symbol": "HUMA",
+        "date": "2024-12-20"
+      },
+      {
+        "symbol": "NIXX",
+        "date": "2024-10-17"
+      },
+      {
+        "symbol": "CNEY",
+        "date": "2024-12-04"
+      },
+      {
+        "symbol": "HELP",
+        "date": "2024-11-18"
+      },
+      {
+        "symbol": "CNTN",
+        "date": "2024-10-30"
+      },
+      {
+        "symbol": "MYSE",
+        "date": "2024-11-06"
+      },
+      {
+        "symbol": "BTCS",
+        "date": "2024-11-13"
+      },
+      {
+        "symbol": "TAOP",
+        "date": "2024-12-20"
+      },
+      {
+        "symbol": "SUNE",
+        "date": "2024-10-18"
+      },
+      {
+        "symbol": "LICN",
+        "date": "2024-12-06"
+      },
+      {
+        "symbol": "LICN",
+        "date": "2024-12-26"
+      },
+      {
+        "symbol": "MAXN",
+        "date": "2024-10-30"
+      },
+      {
+        "symbol": "LXEO",
+        "date": "2024-11-13"
+      },
+      {
+        "symbol": "UCL",
+        "date": "2024-12-18"
+      },
+      {
+        "symbol": "PRFX",
+        "date": "2024-12-19"
+      },
+      {
+        "symbol": "TVRD",
+        "date": "2024-12-20"
+      },
+      {
+        "symbol": "VSEE",
+        "date": "2024-10-21"
+      },
+      {
+        "symbol": "LTBR",
+        "date": "2024-10-29"
+      },
+      {
+        "symbol": "LRMR",
+        "date": "2024-12-16"
+      },
+      {
+        "symbol": "KITT",
+        "date": "2024-12-26"
+      },
+      {
+        "symbol": "CTEV",
+        "date": "2024-12-27"
+      },
+      {
+        "symbol": "TIVC",
+        "date": "2024-12-24"
+      },
+      {
+        "symbol": "NXL",
+        "date": "2024-11-11"
+      },
+      {
+        "symbol": "NCI",
+        "date": "2024-10-02"
+      },
+      {
+        "symbol": "INTZ",
+        "date": "2024-12-30"
+      },
+      {
+        "symbol": "STEM",
+        "date": "2024-12-30"
+      },
+      {
+        "symbol": "CANG",
+        "date": "2024-12-19"
+      },
+      {
+        "symbol": "RZLV",
+        "date": "2024-11-20"
+      },
+      {
+        "symbol": "AMBO",
+        "date": "2024-12-27"
+      }
+    ],
+    "rl": {
+      "n_seeds": 3,
+      "total_test_pnl": 1957.838926975368,
+      "total_test_pnl_per_seed": [
+        1979.7168518964172,
+        1914.0830771332694,
+        1979.7168518964172
+      ],
+      "total_test_pnl_std_across_seeds": 37.893677527434654,
+      "win_rate": 0.4000000000000001,
+      "win_rate_per_seed": [
+        0.4,
+        0.4,
+        0.4
+      ],
+      "mean_per_setup_pnls": [
+        38.82679860938515,
+        6.192452830189723,
+        8.153370067098876,
+        0.0,
+        -5.555317827092949,
+        0.0,
+        0.0,
+        605.920877246157,
+        0.0,
+        0.0,
+        137.94461923062045,
+        0.0,
+        0.0,
+        25.83268446843431,
+        3.2390804597671377,
+        -443.0162674498861,
+        -24.02472336203209,
+        0.0,
+        20.89325117370754,
+        174.84881531618885,
+        -311.73298180855636,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        102.11539599903335,
+        0.0,
+        414.5991191046487,
+        -25.969960086396895,
+        0.0,
+        190.221689944432,
+        643.9567004019482,
+        10.362731609144248,
+        231.46827633345674,
+        11.675259854804608,
+        19.87244094487687,
+        58.61780929866654,
+        -9.060435663617682,
+        0.0,
+        2.1912235338968458,
+        0.0,
+        0.0,
+        0.0,
+        70.26601674649282,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "rule_baseline": {
+      "total_test_pnl": 1665.8377385490312,
+      "mean_episode_pnl": 33.31675477098062,
+      "win_rate": 0.18,
+      "total_trades": 15,
+      "mean_trades_per_episode": 0.3,
+      "mean_winner": 296.8224015126519,
+      "mean_loser": -167.59397917747265,
+      "n_winners": 9,
+      "n_losers": 6,
+      "n_zero_pnl": 35,
+      "per_setup_pnls": [
+        71.57125382262166,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        611.5051688490639,
+        0.0,
+        0.0,
+        135.75198329854175,
+        0.0,
+        0.0,
+        677.2622095779952,
+        0.0,
+        -797.1811965812085,
+        -21.83037249284098,
+        0.0,
+        0.0,
+        211.0987292277714,
+        -158.4304461942229,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        140.49363867685315,
+        0.0,
+        616.0338983050897,
+        -5.225000000005821,
+        0.0,
+        0.0,
+        0.0,
+        -14.13383458647877,
+        73.34246575343423,
+        0.0,
+        0.0,
+        0.0,
+        -8.763025210078922,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        134.34226610249607,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "per_episode_results": [
+        {
+          "symbol": "JDZG",
+          "date": "2024-12-30",
+          "pnl": 71.57125382262166,
+          "trades": 1
+        },
+        {
+          "symbol": "UAMY",
+          "date": "2024-12-05",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "TOVX",
+          "date": "2024-12-24",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "TIVC",
+          "date": "2024-11-08",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "QBTS",
+          "date": "2024-11-22",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "CCTG",
+          "date": "2024-10-24",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "QBTS",
+          "date": "2024-12-19",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "SOS",
+          "date": "2024-11-27",
+          "pnl": 611.5051688490639,
+          "trades": 1
+        },
+        {
+          "symbol": "HRTX",
+          "date": "2024-12-03",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "FATE",
+          "date": "2024-11-18",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "VCIG",
+          "date": "2024-12-02",
+          "pnl": 135.75198329854175,
+          "trades": 1
+        },
+        {
+          "symbol": "MOBX",
+          "date": "2024-12-02",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "SPRC",
+          "date": "2024-12-26",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "RYM",
+          "date": "2024-11-14",
+          "pnl": 677.2622095779952,
+          "trades": 1
+        },
+        {
+          "symbol": "DUO",
+          "date": "2024-12-11",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "NVNI",
+          "date": "2024-12-19",
+          "pnl": -797.1811965812085,
+          "trades": 1
+        },
+        {
+          "symbol": "ADGM",
+          "date": "2024-11-14",
+          "pnl": -21.83037249284098,
+          "trades": 1
+        },
+        {
+          "symbol": "PYXS",
+          "date": "2024-11-20",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "ORKT",
+          "date": "2024-10-24",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "PULM",
+          "date": "2024-11-14",
+          "pnl": 211.0987292277714,
+          "trades": 1
+        },
+        {
+          "symbol": "WKEY",
+          "date": "2024-12-13",
+          "pnl": -158.4304461942229,
+          "trades": 1
+        },
+        {
+          "symbol": "HUMA",
+          "date": "2024-12-20",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "NIXX",
+          "date": "2024-10-17",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "CNEY",
+          "date": "2024-12-04",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "HELP",
+          "date": "2024-11-18",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "CNTN",
+          "date": "2024-10-30",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "MYSE",
+          "date": "2024-11-06",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "BTCS",
+          "date": "2024-11-13",
+          "pnl": 140.49363867685315,
+          "trades": 1
+        },
+        {
+          "symbol": "TAOP",
+          "date": "2024-12-20",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "SUNE",
+          "date": "2024-10-18",
+          "pnl": 616.0338983050897,
+          "trades": 1
+        },
+        {
+          "symbol": "LICN",
+          "date": "2024-12-06",
+          "pnl": -5.225000000005821,
+          "trades": 1
+        },
+        {
+          "symbol": "LICN",
+          "date": "2024-12-26",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "MAXN",
+          "date": "2024-10-30",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "LXEO",
+          "date": "2024-11-13",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "UCL",
+          "date": "2024-12-18",
+          "pnl": -14.13383458647877,
+          "trades": 1
+        },
+        {
+          "symbol": "PRFX",
+          "date": "2024-12-19",
+          "pnl": 73.34246575343423,
+          "trades": 1
+        },
+        {
+          "symbol": "TVRD",
+          "date": "2024-12-20",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "VSEE",
+          "date": "2024-10-21",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "LTBR",
+          "date": "2024-10-29",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "LRMR",
+          "date": "2024-12-16",
+          "pnl": -8.763025210078922,
+          "trades": 1
+        },
+        {
+          "symbol": "KITT",
+          "date": "2024-12-26",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "CTEV",
+          "date": "2024-12-27",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "TIVC",
+          "date": "2024-12-24",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "NXL",
+          "date": "2024-11-11",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "NCI",
+          "date": "2024-10-02",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "INTZ",
+          "date": "2024-12-30",
+          "pnl": 134.34226610249607,
+          "trades": 1
+        },
+        {
+          "symbol": "STEM",
+          "date": "2024-12-30",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "CANG",
+          "date": "2024-12-19",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "RZLV",
+          "date": "2024-11-20",
+          "pnl": 0.0,
+          "trades": 0
+        },
+        {
+          "symbol": "AMBO",
+          "date": "2024-12-27",
+          "pnl": 0.0,
+          "trades": 0
+        }
+      ]
+    },
+    "delta": {
+      "rule_minus_rl_total_pnl": -292.00118842633674,
+      "rule_beats_rl": false,
+      "rl_minus_rule_total_pnl": 292.00118842633674
+    }
+  },
+  "rl_results_paths": [
+    "models/ppo_discrete_3mo_s42/quick_test_results.json",
+    "models/ppo_discrete_3mo_s43/quick_test_results.json",
+    "models/ppo_discrete_3mo_s44/quick_test_results.json"
+  ]
+}

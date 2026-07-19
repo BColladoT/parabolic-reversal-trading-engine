@@ -36,6 +36,28 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+# Supported bin counts for the Discrete action space. See
+# EnvironmentConfig.discrete_action_bins for the full layout documentation.
+# ENTRY magnitudes are negative (short exposure). COVER magnitudes are positive
+# (fraction of current position to close). All ladders are ASCENDING in
+# absolute magnitude so bin index 1 is always the smallest non-HOLD action —
+# matches the historical N=7 convention enforced by
+# tests/test_env_discrete_action.test_discrete_bin_semantics_math.
+_DISCRETE_BIN_LAYOUTS: Dict[int, Tuple[Tuple[float, ...], Tuple[float, ...]]] = {
+    3:  ((-1.00,),
+         (1.00,)),
+    5:  ((-0.50, -1.00),
+         (0.50, 1.00)),
+    7:  ((-0.25, -0.50, -1.00),
+         (0.25, 0.50, 1.00)),
+    9:  ((-0.25, -0.50, -0.75, -1.00),
+         (0.25, 0.50, 0.75, 1.00)),
+    11: ((-0.10, -0.25, -0.50, -0.75, -1.00),
+         (0.10, 0.25, 0.50, 0.75, 1.00)),
+}
+SUPPORTED_DISCRETE_BIN_COUNTS = tuple(sorted(_DISCRETE_BIN_LAYOUTS.keys()))
+
+
 def r_multiple_reward_term(
     realized_r: float,
     weight: float,
@@ -254,11 +276,41 @@ class EnvironmentConfig:
     # discretization layer is an additional, separable bottleneck.
     action_space_type: str = "continuous"
 
-    # Number of bins for Discrete action space. Default 7:
-    #   0=HOLD,
-    #   1-3=ENTRY at exposure_fraction in {-0.25, -0.50, -1.00},
-    #   4-6=COVER fraction in {0.25, 0.50, 1.00}.
+    # Number of bins for Discrete action space. Default 7. Supported values:
+    # {3, 5, 7, 9, 11}. All layouts use ASCENDING magnitude (smallest first),
+    # matching the historical N=7 convention. The HOLD bin is always 0; ENTRY
+    # bins fill [1, 1+n_entry), COVER bins fill [1+n_entry, N), where
+    # n_entry = (N - 1) // 2 and n_cover = (N - 1) - n_entry.
+    #
+    #   N=3:  0=HOLD, 1=ENTRY-100%, 2=COVER+100%
+    #   N=5:  0=HOLD, 1-2=ENTRY {-0.50, -1.00}, 3-4=COVER {0.50, 1.00}
+    #   N=7:  0=HOLD, 1-3=ENTRY {-0.25, -0.50, -1.00}, 4-6=COVER {0.25, 0.50, 1.00}
+    #   N=9:  0=HOLD, 1-4=ENTRY {-0.25, -0.50, -0.75, -1.00},
+    #         5-8=COVER {0.25, 0.50, 0.75, 1.00}
+    #   N=11: 0=HOLD, 1-5=ENTRY {-0.10, -0.25, -0.50, -0.75, -1.00},
+    #         6-10=COVER {0.10, 0.25, 0.50, 0.75, 1.00}
+    #
+    # Unsupported N raises ValueError at env construction (validated in
+    # ParabolicReversalEnv.__init__ after env_config overrides are applied).
     discrete_action_bins: int = 7
+
+    def __post_init__(self):
+        """Validate config invariants at construction time.
+
+        Currently enforces:
+          - ``discrete_action_bins`` must be in
+            ``SUPPORTED_DISCRETE_BIN_COUNTS`` (= {3, 5, 7, 9, 11}).
+            The check fires for both the default-constructed config and any
+            direct ``EnvironmentConfig(discrete_action_bins=N)`` call. The
+            env's ``__init__`` re-validates after applying env_config dict
+            overrides (the RLlib EnvContext path mutates the field via
+            ``setattr``, which bypasses ``__post_init__``).
+        """
+        if self.discrete_action_bins not in _DISCRETE_BIN_LAYOUTS:
+            raise ValueError(
+                f"discrete_action_bins must be in {SUPPORTED_DISCRETE_BIN_COUNTS}, "
+                f"got {self.discrete_action_bins}"
+            )
 
 
 class PercentileRewardScaler:
@@ -387,7 +439,19 @@ class ParabolicReversalEnv(gym.Env):
             self.date_range = None
             self.env_seed = None
             self.mode = "train"
-            
+
+        # Re-validate discrete_action_bins after env_config overrides have
+        # been applied. EnvironmentConfig.__post_init__ catches direct
+        # construction with a bad value, but the RLlib EnvContext path
+        # above mutates the field via setattr() — which bypasses
+        # __post_init__. Fail fast here so unsupported N can't silently
+        # produce a malformed action space / mask.
+        if self.config.discrete_action_bins not in _DISCRETE_BIN_LAYOUTS:
+            raise ValueError(
+                f"discrete_action_bins must be in {SUPPORTED_DISCRETE_BIN_COUNTS}, "
+                f"got {self.config.discrete_action_bins}"
+            )
+
         self.initial_capital = initial_capital
         self.render_mode = render_mode
 
@@ -453,6 +517,21 @@ class ParabolicReversalEnv(gym.Env):
         self.episode_trades = 0
         self.episode_wins = 0
         self.daily_returns: deque = deque(maxlen=self.config.sortino_lookback)
+
+        # Phase 1.1: action-distribution + time-in-position diagnostics.
+        # ``_action_histogram`` is keyed by discrete bin index and only
+        # populated when ``action_space_type == "discrete"`` — for the
+        # continuous action space it stays at all-zero (int(action) on a
+        # Box sample is meaningless, so we deliberately skip it). The
+        # diagnostics flow into ``get_episode_diagnostics()`` and are consumed
+        # by the trainer (Phase 1.2) and the bin-count sweep (Phase 4).
+        self._action_histogram = {
+            i: 0 for i in range(self.config.discrete_action_bins)
+        }
+        self._bars_in_position_per_trade: List[int] = []
+        self._current_position_bars = 0
+        self._n_trades = 0
+        self.episode_step_count = 0
         
         # 60-bar history buffer for TCN-AE encoding
         self.price_history: deque = deque(maxlen=60)
@@ -668,6 +747,15 @@ class ParabolicReversalEnv(gym.Env):
         self.price_history.clear()
         self.trade_history.clear()
 
+        # Phase 1.1: clear action-diagnostic counters for the new episode.
+        self._action_histogram = {
+            i: 0 for i in range(self.config.discrete_action_bins)
+        }
+        self._bars_in_position_per_trade = []
+        self._current_position_bars = 0
+        self._n_trades = 0
+        self.episode_step_count = 0
+
         # Reset violation classification counters
         self._expected_violations = 0
         self._suspicious_violations = 0
@@ -782,6 +870,22 @@ class ParabolicReversalEnv(gym.Env):
         4. Check termination
         5. Return observation
         """
+        # Phase 1.1 fix (C1): episode_step_count must increment for EVERY
+        # step() invocation — including those that short-circuit on the
+        # already-triggered circuit-breaker branch below. Bumping it here,
+        # before any early-return path, preserves the invariant
+        #   sum(action_histogram.values()) == episode_step_count
+        # required by tests/test_action_diagnostics.py. The histogram bump
+        # below (inside the discrete-action handler) also runs before the
+        # circuit-breaker short-circuit, so the two counters stay aligned.
+        self.episode_step_count += 1
+
+        # Reset the per-step "did _close_position run?" flag. Used in the
+        # reward block to gate the regular-cover trade increment so it
+        # doesn't double-count when _close_position fired earlier in the
+        # step (intra-step stop, post-advance circuit-breaker flatten).
+        self._position_closed_this_step = False
+
         # Store previous equity and position for reward calculation
         self.prev_capital = self.current_capital
         prev_position = self.current_position
@@ -794,6 +898,15 @@ class ParabolicReversalEnv(gym.Env):
         if self.config.action_space_type == "discrete":
             action_int = int(action) if not hasattr(action, "__len__") else int(action[0])
             discrete_action_index = action_int
+            # Phase 1.1: record the agent's raw bin choice BEFORE the mask
+            # may override action_type to HOLD. We want to see what the
+            # policy is actually sampling, not what the mask collapses it
+            # to. (Continuous path skips this — int(Box-sample) is
+            # meaningless for histogramming.)
+            if 0 <= action_int < self.config.discrete_action_bins:
+                self._action_histogram[action_int] = (
+                    self._action_histogram.get(action_int, 0) + 1
+                )
             action_type, desired_exposure_fraction = self._apply_discrete_action(action_int)
             assert -1.0 <= desired_exposure_fraction <= 1.0, \
                 f"Discrete action {action_int} produced out-of-range magnitude {desired_exposure_fraction}"
@@ -1029,6 +1142,9 @@ class ParabolicReversalEnv(gym.Env):
         
         # === C. CALCULATE COMPOSITE REWARD using NEW price P_{t+1} ===
         self.global_timestep += 1
+        # NOTE: episode_step_count is bumped at the TOP of step() so the
+        # histogram-vs-step-count invariant survives the circuit-breaker
+        # short-circuit branch (see Phase 1.1 fix C1).
 
         # Update trade lifecycle tracking BEFORE computing shaping bonuses
         self._just_entered = (prev_position == 0.0 and self.current_position < 0.0)
@@ -1043,6 +1159,17 @@ class ParabolicReversalEnv(gym.Env):
         else:
             self.bars_in_trade = 0
             self.bars_since_last_trade += 1
+
+        # Phase 1.1: time-in-position counter. Counts every step the env
+        # is in a non-flat position. The FLUSH (append-and-reset) is now
+        # performed inside ``_close_position()`` so it fires on every
+        # close path — including the circuit-breaker short-circuit, the
+        # intra-step stop, and the active-circuit-breaker flatten — not
+        # just the regular cover that returns through this branch.
+        # ``self.current_position != 0`` covers shorts (negative) since
+        # longs are forbidden by the strategy.
+        if self.current_position != 0:
+            self._current_position_bars += 1
 
         base_reward = self._calculate_true_reward()
         drawdown_penalty = self._compute_drawdown_penalty()
@@ -1059,6 +1186,20 @@ class ParabolicReversalEnv(gym.Env):
         completion_bonus = 0.0
         r_multiple_term = 0.0  # A4: per-trade R-multiple reward (default weight 0 = no-op)
         if prev_position < 0 and self.current_position == 0:
+            # Phase 1.1 fix (C2): _n_trades is incremented inside
+            # _close_position() for the non-regular close paths
+            # (circuit-breaker, intra-step stop, EOD/bankruptcy flatten).
+            # The regular discrete-COVER path zeros position via
+            # _execute_position_change WITHOUT calling _close_position,
+            # so we bump here for that case — gated by the
+            # _position_closed_this_step flag to avoid double-counting.
+            # We also flush the time-in-position counter here, mirroring
+            # the same logic in _close_position().
+            if not self._position_closed_this_step:
+                if self._current_position_bars > 0:
+                    self._bars_in_position_per_trade.append(self._current_position_bars)
+                    self._current_position_bars = 0
+                self._n_trades += 1
             trade_pnl = getattr(self, '_last_trade_pnl', 0.0)
             completion_bonus = self._compute_trade_completion_bonus(
                 trade_pnl=trade_pnl,
@@ -1330,37 +1471,51 @@ class ParabolicReversalEnv(gym.Env):
             return 2  # Action 2: Hold
 
     def _apply_discrete_action(self, action_int: int) -> tuple:
-        """Decode a Discrete(7) action into (action_type, desired_exposure_fraction).
+        """Decode a Discrete(N) action into (action_type, desired_exposure_fraction).
 
         Returns the same (action_type, magnitude) tuple that the continuous
         path produces after _discretize_action; downstream step() code consumes
-        them identically.
+        them identically. Action-type encoding: 0=ENTRY, 1=COVER, 2=HOLD.
 
-        Bin layout (for discrete_action_bins == 7):
-            0: HOLD                            -> (action_type=2, magnitude=0.0)
-            1: ENTRY exposure_fraction=-0.25   -> (0, -0.25)
-            2: ENTRY exposure_fraction=-0.50   -> (0, -0.50)
-            3: ENTRY exposure_fraction=-1.00   -> (0, -1.00)
-            4: COVER 25% of current position   -> (1, +0.25)
-            5: COVER 50%                       -> (1, +0.50)
-            6: COVER 100% (full exit)          -> (1, +1.00)
+        Supports N in {3, 5, 7, 9, 11}; see ``_DISCRETE_BIN_LAYOUTS`` at module
+        scope and ``EnvironmentConfig.discrete_action_bins`` for the full
+        layout table. All ladders are ASCENDING in absolute magnitude (bin 1
+        is always the smallest non-HOLD action) so the historical N=7
+        semantics (bin 1 = ENTRY-25%, bin 3 = ENTRY-100%) are preserved.
 
         Designed for PPO with a categorical policy head — no Gaussian noise,
         no policy.compute -> discretize round-trip. See
         docs/ppo_continuous_smoke_2026-05-19.md for the prior result that
         motivated keeping this purely as an additive experiment.
+
+        Raises:
+            ValueError: if the env was constructed with an unsupported
+                ``discrete_action_bins`` value, or if ``action_int`` is
+                outside ``[0, N-1]``.
         """
+        n_bins = self.config.discrete_action_bins
+        try:
+            entry_mags, cover_mags = _DISCRETE_BIN_LAYOUTS[n_bins]
+        except KeyError as exc:
+            raise ValueError(
+                f"discrete_action_bins must be in {SUPPORTED_DISCRETE_BIN_COUNTS}, "
+                f"got {n_bins}"
+            ) from exc
+
         action_int = int(action_int)
         if action_int == 0:
             return (2, 0.0)  # HOLD
-        if action_int in (1, 2, 3):
-            mags = {1: -0.25, 2: -0.50, 3: -1.00}
-            return (0, mags[action_int])  # ENTRY
-        if action_int in (4, 5, 6):
-            mags = {4: 0.25, 5: 0.50, 6: 1.00}
-            return (1, mags[action_int])  # COVER
+
+        n_entry = len(entry_mags)
+        # ENTRY range: [1, 1+n_entry)
+        if 1 <= action_int < 1 + n_entry:
+            return (0, entry_mags[action_int - 1])  # ENTRY
+        # COVER range: [1+n_entry, N)
+        if 1 + n_entry <= action_int < n_bins:
+            return (1, cover_mags[action_int - 1 - n_entry])  # COVER
+
         raise ValueError(
-            f"Discrete action {action_int} out of range [0, {self.config.discrete_action_bins - 1}]"
+            f"Discrete action {action_int} out of range [0, {n_bins - 1}]"
         )
 
     def _compute_cover_target(self, desired_exposure_fraction: float) -> float:
@@ -1421,8 +1576,10 @@ class ParabolicReversalEnv(gym.Env):
     def _compute_discrete_action_mask(self) -> np.ndarray:
         """Discrete(N) action mask. Project the 3 conceptual gates onto bins.
 
-        Bin layout (for discrete_action_bins == 7):
-            0 = HOLD, 1..3 = ENTRY (3 magnitudes), 4..6 = COVER (3 magnitudes).
+        Supports N in ``SUPPORTED_DISCRETE_BIN_COUNTS`` (= {3, 5, 7, 9, 11}).
+        Bin layout: bin 0 = HOLD; bins [1, 1+n_entry) = ENTRY magnitudes;
+        bins [1+n_entry, N) = COVER magnitudes — where
+        ``n_entry = (N - 1) // 2`` and ``n_cover = (N - 1) - n_entry``.
         Each conceptual gate (entry_ok / cover_ok / hold_ok) toggles its
         corresponding contiguous bin range.
         """
@@ -1457,15 +1614,17 @@ class ParabolicReversalEnv(gym.Env):
             if current_exposure >= self.config.max_position_value:
                 entry_ok = 0
 
-        # Project onto bins
+        # Project onto bins. Layout is parameterized by n_entry_bins; works for
+        # every supported N including the degenerate N=3 case (1 ENTRY + 1 COVER).
+        n_entry_bins = (n_bins - 1) // 2
         # bin 0: HOLD
         mask[0] = int(hold_ok)
-        # bins 1..3: ENTRY (assumes 7-bin layout; generalize if discrete_action_bins changes)
-        if n_bins >= 4:
-            mask[1:4] = int(entry_ok)
-        # bins 4..6: COVER
-        if n_bins >= 7:
-            mask[4:7] = int(cover_ok)
+        # bins [1, 1+n_entry_bins): ENTRY
+        if n_entry_bins > 0:
+            mask[1:1 + n_entry_bins] = int(entry_ok)
+        # bins [1+n_entry_bins, n_bins): COVER
+        if n_bins - 1 - n_entry_bins > 0:
+            mask[1 + n_entry_bins:n_bins] = int(cover_ok)
         return mask
     
     def _calculate_kelly_constrained_leverage(self) -> float:
@@ -1908,13 +2067,38 @@ class ParabolicReversalEnv(gym.Env):
         self.rolling_kelly_fraction = self._calculate_kelly_constrained_leverage()
     
     def _close_position(self):
-        """Close current position."""
-        if self.current_position != 0:
+        """Close current position.
+
+        Phase 1.1 fix (C1+C2+M3): this method is the single funnel for the
+        non-regular close paths — the intra-step stop, the
+        active-circuit-breaker flatten, the EOD flatten, and the
+        bankruptcy/equity-zero path. The regular discrete-COVER goes
+        through ``_execute_position_change`` directly and does NOT call
+        this method. We update the diagnostic counters here so they fire
+        for all the non-regular paths, and the step() reward block
+        handles the regular-cover case (guarded against double-counting
+        via ``_position_closed_this_step``).
+        """
+        was_open = self.current_position != 0
+        if was_open:
             self._execute_position_change(0.0)
         self.current_position = 0.0
         self.current_position_value = 0.0
         self.entry_price = 0.0
         self.unrealized_pnl = 0.0
+
+        # Diagnostic counters fire on every non-regular close path. The
+        # ``was_open`` guard ensures a no-op call (already flat) doesn't
+        # bump the trade count or push a stale bars-in-position sample.
+        # ``_position_closed_this_step`` tells the step() reward block to
+        # skip its own increment (avoids double-counting when both this
+        # method AND the reward block see ``current_position == 0``).
+        if was_open:
+            if self._current_position_bars > 0:
+                self._bars_in_position_per_trade.append(self._current_position_bars)
+                self._current_position_bars = 0
+            self._n_trades += 1
+            self._position_closed_this_step = True
     
     def _estimate_potential_loss(self, target_value: float) -> float:
         """Estimate potential loss from position change.
@@ -2004,6 +2188,47 @@ class ParabolicReversalEnv(gym.Env):
             'episode_source': getattr(self, '_episode_source', 'unknown'),
             'expected_violations': getattr(self, '_expected_violations', 0),
             'suspicious_violations': getattr(self, '_suspicious_violations', 0),
+        }
+
+    def get_episode_diagnostics(self) -> Dict:
+        """Return action-distribution + time-in-position DIAGNOSTIC summary.
+
+        This is distinct from Gym's per-step ``info`` dict returned by
+        ``step()`` — it's an end-of-episode summary intended for
+        logging/dashboards, not a per-step signal. Renamed from
+        ``get_episode_info`` (Phase 1.1 fix I1) to avoid the name
+        collision with the Gym ``info`` semantic.
+
+        Phase 1.1: surfaces the per-episode counters maintained inside
+        ``step()`` and ``_close_position()``. Consumed by the trainer
+        (Phase 1.2) to log the aggregate action distribution per training
+        iteration, and by the bin-count sweep (Phase 4) to detect policy
+        collapse via action-distribution entropy.
+
+        For the continuous action space ``_action_histogram`` is
+        all-zero (the int(Box-sample) projection isn't meaningful), so
+        callers should gate consumption on ``action_space_type``.
+
+        Returns:
+            dict with keys:
+                action_histogram: {bin_idx: count} for every bin
+                mean_bars_in_position: mean over completed round-trips
+                median_bars_in_position: median over completed round-trips
+                n_trades: number of completed round-trips this episode
+                n_bars: total steps taken this episode
+        """
+        return {
+            "action_histogram": dict(self._action_histogram),
+            "mean_bars_in_position": (
+                float(np.mean(self._bars_in_position_per_trade))
+                if self._bars_in_position_per_trade else 0.0
+            ),
+            "median_bars_in_position": (
+                float(np.median(self._bars_in_position_per_trade))
+                if self._bars_in_position_per_trade else 0.0
+            ),
+            "n_trades": self._n_trades,
+            "n_bars": self.episode_step_count,
         }
     
     def render(self):
